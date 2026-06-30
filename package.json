@@ -50,11 +50,15 @@
 		"jest": "^30.0.0",
 		"n8n-workflow": ">=2.0.0",
 		"prettier": "3.8.3",
-		"release-it": "20.2.0",
+		"release-it": "^20.2.1",
 		"ts-jest": "^29.4.0",
 		"typescript": "5.9.3"
 	},
 	"peerDependencies": {
 		"n8n-workflow": "*"
+	},
+	"overrides": {
+		"@langchain/classic": "^1.0.38",
+		"@langchain/community": "^1.1.29"
 	}
 }
