@@ -1,0 +1,54 @@
+{
+	"name": "n8n-nodes-exasol",
+	"version": "0.1.0",
+	"description": "n8n community nodes for Exasol",
+	"license": "MIT",
+	"homepage": "https://github.com/exasol/n8n-nodes",
+	"keywords": [
+		"n8n-community-node-package"
+	],
+	"author": {
+		"name": "Exasol AG",
+		"email": "opensource@exasol.com"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/exasol/n8n-nodes.git"
+	},
+	"scripts": {
+		"build": "n8n-node build",
+		"build:watch": "tsc --watch",
+		"dev": "n8n-node dev",
+		"lint": "n8n-node lint",
+		"lint:fix": "n8n-node lint --fix",
+		"release": "n8n-node release",
+		"prepublishOnly": "n8n-node prerelease"
+	},
+	"files": [
+		"dist"
+	],
+	"n8n": {
+		"n8nNodesApiVersion": 1,
+		"credentials": [
+			"dist/credentials/ExasolApi.credentials.js"
+		],
+		"nodes": [
+			"dist/nodes/Exasol/Exasol.node.js"
+		]
+	},
+	"dependencies": {
+		"@exasol/exasol-driver-ts": "^0.4.0",
+		"ws": "^8.21.0"
+	},
+	"devDependencies": {
+		"@n8n/node-cli": "*",
+		"@types/ws": "^8.18.1",
+		"eslint": "9.39.4",
+		"prettier": "3.8.3",
+		"release-it": "20.2.0",
+		"typescript": "5.9.3"
+	},
+	"peerDependencies": {
+		"n8n-workflow": "*"
+	}
+}
