@@ -56,9 +56,5 @@
 	},
 	"peerDependencies": {
 		"n8n-workflow": "*"
-	},
-	"overrides": {
-		"@langchain/classic": "^1.0.38",
-		"@langchain/community": "^1.1.29"
 	}
 }

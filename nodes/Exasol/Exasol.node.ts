@@ -45,7 +45,7 @@ export class Exasol implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Exasol',
 		name: 'exasol',
-		icon: 'file:exasol.svg',
+		icon: { light: 'file:exasol.svg', dark: 'file:exasol.dark.svg' },
 		group: ['transform'],
 		version: 1,
 		description: 'Execute SQL queries against an Exasol database',
