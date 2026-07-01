@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  distributed-tasks:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        target: ['lint', 'test', 'build']
+    env:
+      DEFAULT_TARGET: 'test'
+    steps:
+      - uses: actions/checkout@v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6.4.0
+        with:
+          node-version: 'lts/*'
+          cache: 'npm'
+      - run: npm ci --ignore-scripts
+      - run: npm run ${{ matrix.target }}
+      - name: Security audit
+        if: ${{ matrix.target == env.DEFAULT_TARGET }}
+        run: npm audit --audit-level=high
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarqube-scan-action@v8.2.0
+        if: ${{ matrix.target == env.DEFAULT_TARGET }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  test-node-compatibility:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22', '24', '26']
+    name: Node ${{ matrix.node }} compatibility test
+    steps:
+      - uses: actions/checkout@v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6.4.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: 'npm'
+      - run: npm ci --ignore-scripts
+      - run: npm run test
+
+  build:
+    runs-on: ubuntu-latest
+    needs: [distributed-tasks, test-node-compatibility]
+    steps:
+      - run: echo "All checks passed, build successful!"

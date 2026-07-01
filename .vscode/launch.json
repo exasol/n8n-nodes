@@ -1,0 +1,16 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "Attach to n8n",
+			"type": "node",
+			"request": "attach",
+			"port": 9229,
+			"restart": true,
+			"sourceMaps": true,
+			"outFiles": [
+				"${workspaceFolder}/dist/**/*.js"
+			]
+		}
+	]
+}
