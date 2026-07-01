@@ -53,13 +53,5 @@ export class ExasolApi implements ICredentialType {
 			default: '',
 			description: 'Default schema for queries (optional)',
 		},
-		{
-			displayName: 'Encryption',
-			name: 'encryption',
-			type: 'boolean',
-			// TLS is on by default; disable only for local/dev clusters that lack certificates.
-			default: true,
-			description: 'Whether to use TLS encryption for the database connection',
-		},
 	];
 }

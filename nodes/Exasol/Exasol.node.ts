@@ -20,7 +20,6 @@ interface ExasolCredentials {
 	user: string;
 	password: string;
 	schema: string;
-	encryption: boolean;
 }
 
 // ws.WebSocket.readyState includes 0 (CONNECTING) which ExaWebsocket does not define,
@@ -37,7 +36,6 @@ function buildDriver(creds: ExasolCredentials): ExasolDriver {
 		user: creds.user,
 		password: creds.password,
 		schema: creds.schema || undefined, // empty string must not be passed to the driver
-		encryption: creds.encryption,
 	});
 }
 
