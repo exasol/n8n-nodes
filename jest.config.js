@@ -6,6 +6,21 @@ const tsJestTransform = {
 };
 
 module.exports = {
+	// Coverage settings must be at root level — Jest silently ignores them inside
+	// individual project configs when using --selectProjects.
+	collectCoverage: true,
+	coverageDirectory: 'coverage',
+	// Explicitly enumerate source roots so every file is instrumented regardless
+	// of whether a test imports it. Without this, Jest only instruments files
+	// that happen to be imported — files not yet wired into the import chain
+	// simply vanish from coverage/lcov.info and SonarCloud reports 0%.
+	collectCoverageFrom: ['nodes/**/*.ts', 'credentials/**/*.ts'],
+	coveragePathIgnorePatterns: ['/node_modules/', '/dist/'],
+
+	// passWithNoTests at root so --selectProjects itest doesn't fail when no
+	// *.itest.ts files exist yet.
+	passWithNoTests: true,
+
 	projects: [
 		{
 			displayName: 'unit',
@@ -13,14 +28,6 @@ module.exports = {
 			testMatch: ['<rootDir>/tests/unit/**/*.test.ts'],
 			transform: tsJestTransform,
 			modulePathIgnorePatterns: ['<rootDir>/dist/'],
-			collectCoverage: true,
-			coverageDirectory: 'coverage',
-			// Explicitly enumerate source roots so every file is instrumented regardless
-			// of whether a test imports it. Without this, Jest only instruments files
-			// that happen to be imported — files not yet wired into the import chain
-			// simply vanish from coverage/lcov.info and SonarCloud reports 0%.
-			collectCoverageFrom: ['nodes/**/*.ts', 'credentials/**/*.ts'],
-			coveragePathIgnorePatterns: ['/node_modules/', '/dist/', '/tests/integration/'],
 		},
 		{
 			displayName: 'itest',
@@ -34,8 +41,6 @@ module.exports = {
 			// Multiple parallel workers would each spin up their own exasol/docker-db
 			// (~3-4 GB each), which OOMs the CI runner.
 			maxWorkers: 1,
-			// PR2 ships no *.itest.ts files yet; pass rather than error on empty match.
-			passWithNoTests: true,
 		},
 	],
 };
