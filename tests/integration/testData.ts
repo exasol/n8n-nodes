@@ -103,21 +103,19 @@ async function insertRows(driver: ExasolDriver, schema: string): Promise<void> {
 }
 
 async function createViews(driver: ExasolDriver, schema: string): Promise<void> {
+	// Exasol does not support COMMENT ON VIEW — view comments must be embedded
+	// in the CREATE VIEW statement using the COMMENT IS '...' clause.
 	await driver.execute(`
-		CREATE VIEW ${schema}.HIGH_ALTITUDE_RESORT AS
-			SELECT * FROM ${schema}.SKI_RESORT WHERE ALTITUDE > 2000
+		CREATE VIEW ${schema}.HIGH_ALTITUDE_RESORT
+		COMMENT IS 'ski resorts situated at the altitude higher than 2000 meters'
+		AS SELECT * FROM ${schema}.SKI_RESORT WHERE ALTITUDE > 2000
 	`);
-	await driver.execute(
-		`COMMENT ON VIEW ${schema}.HIGH_ALTITUDE_RESORT IS 'ski resorts situated at the altitude higher than 2000 meters'`,
-	);
 
 	await driver.execute(`
-		CREATE VIEW ${schema}.DIFFICULT_RUN AS
-			SELECT * FROM ${schema}.SKI_RUN WHERE UPPER(DIFFICULTY) = 'BLACK'
+		CREATE VIEW ${schema}.DIFFICULT_RUN
+		COMMENT IS 'the view lists all known black runs'
+		AS SELECT * FROM ${schema}.SKI_RUN WHERE UPPER(DIFFICULTY) = 'BLACK'
 	`);
-	await driver.execute(
-		`COMMENT ON VIEW ${schema}.DIFFICULT_RUN IS 'the view lists all known black runs'`,
-	);
 }
 
 async function createFunctions(driver: ExasolDriver, schema: string): Promise<void> {
