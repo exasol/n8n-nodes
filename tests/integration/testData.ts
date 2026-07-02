@@ -45,9 +45,9 @@ async function createTables(driver: ExasolDriver, schema: string): Promise<void>
 	await driver.execute(`
 		CREATE TABLE ${schema}.SKI_RUN (
 			RESORT_ID  DECIMAL(18,0),
-			RUN_NAME   VARCHAR(200) UTF8,
-			DIFFICULTY VARCHAR(10) UTF8,
-			LENGTH     DECIMAL(18,0),
+			RUN_NAME    VARCHAR(200) UTF8,
+			DIFFICULTY  VARCHAR(10) UTF8,
+			RUN_LENGTH  DECIMAL(18,0),
 			CONSTRAINT SKI_RUN_PK  PRIMARY KEY (RESORT_ID, RUN_NAME),
 			CONSTRAINT RESORT_FK   FOREIGN KEY (RESORT_ID)
 				REFERENCES ${schema}.SKI_RESORT (RESORT_ID)
@@ -63,7 +63,7 @@ async function createTables(driver: ExasolDriver, schema: string): Promise<void>
 		`COMMENT ON COLUMN ${schema}.SKI_RUN.DIFFICULTY IS 'the run difficulty level - green, blue, red, black'`,
 	);
 	await driver.execute(
-		`COMMENT ON COLUMN ${schema}.SKI_RUN.LENGTH IS 'the run length in meters'`,
+		`COMMENT ON COLUMN ${schema}.SKI_RUN.RUN_LENGTH IS 'the run length in meters'`,
 	);
 
 	// Junction table: competitions held at a specific run; starts with no rows.
