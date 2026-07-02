@@ -26,8 +26,15 @@ interface ExasolCredentials {
 
 // ws.WebSocket.readyState includes 0 (CONNECTING) which ExaWebsocket does not define,
 // so the types don't align structurally. The cast through unknown is intentional.
+//
+// NODE_TLS_REJECT_UNAUTHORIZED=0 is the conventional signal to disable certificate
+// validation (e.g. when connecting to a server with a self-signed cert). ws bypasses
+// Node.js's https.request option-processing and calls tls.connect() directly, so
+// the env var has no automatic effect — we must read it explicitly and forward it.
 function createWebsocketFactory() {
-	return (url: string): ExaWebsocket => new WebSocket(url) as unknown as ExaWebsocket;
+	const rejectUnauthorized = process.env.NODE_TLS_REJECT_UNAUTHORIZED !== '0';
+	return (url: string): ExaWebsocket =>
+		new WebSocket(url, { rejectUnauthorized }) as unknown as ExaWebsocket;
 }
 
 // Shared by both execute() and testExasolCredentials() to keep driver configuration in one place.

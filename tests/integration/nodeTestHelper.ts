@@ -45,7 +45,11 @@ export async function openConnection(container: StartedTestContainer): Promise<E
 	const creds = getContainerCredentials(container);
 	// ws.WebSocket does not structurally match ExaWebsocket (missing readyState=0),
 	// so the cast through unknown is intentional — same pattern as Exasol.node.ts.
-	const wsFactory = (url: string): ExaWebsocket => new WebSocket(url) as unknown as ExaWebsocket;
+	// rejectUnauthorized: false is required because exasol/docker-db uses a self-signed
+	// TLS certificate. containerSetup.ts sets NODE_TLS_REJECT_UNAUTHORIZED=0 for this
+	// same reason, but ws calls tls.connect() directly and ignores the env var.
+	const wsFactory = (url: string): ExaWebsocket =>
+		new WebSocket(url, { rejectUnauthorized: false }) as unknown as ExaWebsocket;
 	const driver = new ExasolDriver(wsFactory, {
 		host: creds.host,
 		port: creds.port,

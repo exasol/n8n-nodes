@@ -1,10 +1,10 @@
 import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainers';
 
-// exasol/docker-db uses a self-signed TLS certificate. Node.js rejects self-signed
-// certs by default, which causes the Exasol WebSocket driver (wss://) to fail with
-// E-EDJS-1. Setting this env var here disables TLS certificate validation for the
-// entire integration test process. This module is only imported by *.itest.ts files,
-// so it has no effect on production code or unit tests.
+// exasol/docker-db uses a self-signed TLS certificate. The Exasol WebSocket driver
+// connects via wss:// and would fail with E-EDJS-1 if the cert is rejected.
+// ws calls tls.connect() directly (bypassing https.request), so the env var alone
+// does not disable cert validation — Exasol.node.ts and openConnection() each read
+// it explicitly and forward rejectUnauthorized: false to the WebSocket constructor.
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 const DOCKER_IMAGE = 'exasol/docker-db:2026.1.0';
