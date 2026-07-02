@@ -1,6 +1,6 @@
 import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainers';
 
-const DOCKER_IMAGE = 'exasol/docker-db:latest';
+const DOCKER_IMAGE = 'exasol/docker-db:2026.1.0';
 // 3 minutes: the documented startup is ~2 min; the extra minute absorbs slow CI runners.
 const STARTUP_TIMEOUT_MS = 3 * 60 * 1000;
 

@@ -61,8 +61,11 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run test
 
+  integration-tests:
+    uses: ./.github/workflows/integration.yml
+
   build:
     runs-on: ubuntu-latest
-    needs: [distributed-tasks, test-node-compatibility]
+    needs: [distributed-tasks, test-node-compatibility, integration-tests]
     steps:
       - run: echo "All checks passed, build successful!"

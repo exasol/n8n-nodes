@@ -1,21 +1,7 @@
 name: Integration Tests
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'nodes/**'
-      - 'credentials/**'
-      - 'tests/integration/**'
-  pull_request:
-    paths:
-      - 'nodes/**'
-      - 'credentials/**'
-      - 'tests/integration/**'
-
-concurrency:
-  group: itest-${{ github.ref }}
-  cancel-in-progress: true
+  workflow_call:
 
 jobs:
   integration-tests:

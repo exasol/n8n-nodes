@@ -38,7 +38,7 @@ async function createTables(driver: ExasolDriver, schema: string): Promise<void>
 		`COMMENT ON COLUMN ${schema}.SKI_RESORT.RESORT_ID IS 'the ski resort id'`,
 	);
 	await driver.execute(
-		`COMMENT ON COLUMN ${schema}.SKI_RESORT.ALTITUDE IS 'the ski resort altitude above the see level in meters'`,
+		`COMMENT ON COLUMN ${schema}.SKI_RESORT.ALTITUDE IS 'the ski resort altitude above the sea level in meters'`,
 	);
 
 	// Child table: multiple runs per resort, FK back to SKI_RESORT.
