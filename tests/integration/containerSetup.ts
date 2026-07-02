@@ -5,6 +5,16 @@ const DOCKER_IMAGE = 'exasol/docker-db:2026.1.0';
 const STARTUP_TIMEOUT_MS = 3 * 60 * 1000;
 
 /**
+ * The minimum Jest hook timeout (in ms) for any `beforeAll` that calls
+ * `startExasolContainer`. Pass this as the second argument to `beforeAll`
+ * to prevent Jest from killing the hook before the container is ready.
+ *
+ * Adds a 30-second buffer on top of the container startup timeout to allow
+ * for `openConnection` and other setup work.
+ */
+export const CONTAINER_HOOK_TIMEOUT_MS = STARTUP_TIMEOUT_MS + 30_000;
+
+/**
  * Starts an Exasol Docker container for integration tests.
  *
  * Uses `testcontainers` to pull and start `exasol/docker-db`. The container

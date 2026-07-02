@@ -1,7 +1,7 @@
 import type { StartedTestContainer } from 'testcontainers';
 
 import { Exasol } from '../../nodes/Exasol/Exasol.node';
-import { startExasolContainer } from './containerSetup';
+import { startExasolContainer, CONTAINER_HOOK_TIMEOUT_MS } from './containerSetup';
 import {
 	buildExecuteFunctions,
 	createSchema,
@@ -20,7 +20,7 @@ describe('Execute Query operation', () => {
 	beforeAll(async () => {
 		container = await startExasolContainer();
 		connection = await openConnection(container);
-	});
+	}, CONTAINER_HOOK_TIMEOUT_MS);
 
 	beforeEach(async () => {
 		schema = await createSchema(connection);

@@ -15,6 +15,11 @@ module.exports = {
 			modulePathIgnorePatterns: ['<rootDir>/dist/'],
 			collectCoverage: true,
 			coverageDirectory: 'coverage',
+			// Explicitly enumerate source roots so every file is instrumented regardless
+			// of whether a test imports it. Without this, Jest only instruments files
+			// that happen to be imported — files not yet wired into the import chain
+			// simply vanish from coverage/lcov.info and SonarCloud reports 0%.
+			collectCoverageFrom: ['nodes/**/*.ts', 'credentials/**/*.ts'],
 			coveragePathIgnorePatterns: ['/node_modules/', '/dist/', '/tests/integration/'],
 		},
 		{
