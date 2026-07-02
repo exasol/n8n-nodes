@@ -1,0 +1,35 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'nodes/**'
+      - 'credentials/**'
+      - 'tests/integration/**'
+  pull_request:
+    paths:
+      - 'nodes/**'
+      - 'credentials/**'
+      - 'tests/integration/**'
+
+concurrency:
+  group: itest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6.4.0
+        with:
+          node-version: 'lts/*'
+          cache: 'npm'
+      - run: npm ci --ignore-scripts
+      - run: npm run itest

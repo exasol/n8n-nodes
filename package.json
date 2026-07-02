@@ -23,7 +23,8 @@
 		"lint:fix": "n8n-node lint --fix",
 		"release": "n8n-node release",
 		"prepublishOnly": "n8n-node prerelease",
-		"test": "jest",
+		"test": "jest --selectProjects unit",
+		"itest": "jest --selectProjects itest --passWithNoTests",
 		"test:all": "jest"
 	},
 	"files": [
@@ -51,6 +52,7 @@
 		"n8n-workflow": ">=2.0.0",
 		"prettier": "3.8.3",
 		"release-it": "^20.2.1",
+		"testcontainers": "^12.0.4",
 		"ts-jest": "^29.4.0",
 		"typescript": "5.9.3"
 	},

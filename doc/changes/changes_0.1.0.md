@@ -8,7 +8,8 @@ Initial release of the Exasol n8n community node.
 
 ## Features
 
-* #5 Refactored to the n8n operation model.
+* #5: Refactored to the n8n operation model.
+* #6: Added integration test infrastructure.
 
 ## Dependency Updates
 
