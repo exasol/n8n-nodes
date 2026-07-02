@@ -42,7 +42,12 @@ describe('execute()', () => {
 				host: 'localhost', port: 8563, user: 'u', password: 'p', schema: '',
 			}),
 			getInputData: jest.fn().mockReturnValue(opts.items ?? [{ json: {} }]),
-			getNodeParameter: jest.fn().mockReturnValue(opts.query ?? 'SELECT 1'),
+			// getNodeParameter is called with different names: 'operation' (once, at item 0)
+			// and 'query' (once per input item). Return the appropriate value for each.
+			getNodeParameter: jest.fn().mockImplementation((name: string) => {
+				if (name === 'operation') return 'executeQuery';
+				return opts.query ?? 'SELECT 1';
+			}),
 			continueOnFail: jest.fn().mockReturnValue(opts.continueOnFail ?? false),
 			getNode: jest.fn().mockReturnValue({ name: 'Exasol', type: 'exasol' }),
 		} as unknown as IExecuteFunctions;
@@ -133,5 +138,55 @@ describe('execute()', () => {
 		await expect(
 			node.execute.call(makeContext({ continueOnFail: false })),
 		).rejects.toBeInstanceOf(NodeOperationError);
+	});
+
+	it('returns error item when driver.connect() fails and continueOnFail is true', async () => {
+		mockDriver.connect.mockRejectedValue(new Error('connection refused'));
+
+		const ctx = makeContext({ continueOnFail: true });
+		const [[item]] = await node.execute.call(ctx);
+
+		expect(item.json).toEqual({ error: 'connection refused' });
+	});
+
+	it('returns one error item per input item when connect() fails and continueOnFail is true', async () => {
+		mockDriver.connect.mockRejectedValue(new Error('connection refused'));
+
+		const ctx = makeContext({ items: [{ json: {} }, { json: {} }], continueOnFail: true });
+		const [result] = await node.execute.call(ctx);
+
+		expect(result).toHaveLength(2);
+		expect(result[0].pairedItem).toEqual({ item: 0 });
+		expect(result[1].pairedItem).toEqual({ item: 1 });
+	});
+
+	it('throws NodeOperationError when driver.connect() fails and continueOnFail is false', async () => {
+		mockDriver.connect.mockRejectedValue(new Error('connection refused'));
+
+		await expect(node.execute.call(makeContext())).rejects.toBeInstanceOf(NodeOperationError);
+		expect(mockDriver.close).toHaveBeenCalledTimes(1);
+	});
+
+	it('throws NodeOperationError for an empty query string', async () => {
+		const ctx = makeContext({ query: '' });
+
+		await expect(node.execute.call(ctx)).rejects.toBeInstanceOf(NodeOperationError);
+	});
+
+	it('stores empty-query error in json when continueOnFail is true', async () => {
+		const ctx = makeContext({ query: '   ', continueOnFail: true });
+		const [[item]] = await node.execute.call(ctx);
+
+		expect(item.json).toMatchObject({ error: expect.stringContaining('empty') });
+	});
+
+	it('suppresses driver.close() errors so the real operation result is returned', async () => {
+		mockDriver.query.mockResolvedValue({ getRows: () => [{ id: 1 }] });
+		mockDriver.close.mockRejectedValue(new Error('close failed'));
+
+		// The close error must be swallowed; the operation result is what the caller sees.
+		const [[item]] = await node.execute.call(makeContext());
+
+		expect(item.json).toEqual({ id: 1 });
 	});
 });

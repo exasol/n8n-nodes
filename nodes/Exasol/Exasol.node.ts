@@ -13,6 +13,8 @@ import { ExasolDriver } from '@exasol/exasol-driver-ts';
 import type { ExaWebsocket } from '@exasol/exasol-driver-ts';
 import WebSocket from 'ws';
 
+import { executeQueryDescription, executeQuery } from './operations';
+
 // Shape of the ExasolApi credential fields (mirrors ExasolApi.credentials.ts properties).
 interface ExasolCredentials {
 	host: string;
@@ -39,6 +41,11 @@ function buildDriver(creds: ExasolCredentials): ExasolDriver {
 	});
 }
 
+/**
+ * n8n community node for Exasol. Implements INodeType — the interface n8n uses to discover,
+ * configure, and execute community nodes. Provides credential testing and delegates workflow
+ * executions to the appropriate operation handler in operations/.
+ */
 export class Exasol implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Exasol',
@@ -47,7 +54,9 @@ export class Exasol implements INodeType {
 		group: ['transform'],
 		version: 1,
 		description: 'Execute SQL queries against an Exasol database',
-		subtitle: '={{$parameter["query"]}}',
+		// For Execute Query the subtitle shows the SQL text (most informative per-operation value).
+		// For future operations this falls back to the raw operation key.
+		subtitle: '={{$parameter["operation"] === "executeQuery" ? $parameter["query"] : $parameter["operation"]}}',
 		defaults: {
 			name: 'Exasol',
 		},
@@ -65,18 +74,25 @@ export class Exasol implements INodeType {
 		],
 		properties: [
 			{
-				displayName: 'SQL Query',
-				name: 'query',
-				type: 'string',
-				typeOptions: {
-					rows: 5,
-				},
-				default: '',
-				required: true,
-				placeholder: 'SELECT * FROM my_schema.my_table LIMIT 100',
-				description: 'SQL statement to execute against Exasol',
-				noDataExpression: false,
+				// The operation dropdown is the structural entry point for the node: its value
+				// determines which other fields are displayed (via displayOptions.show on each
+				// operation's description). noDataExpression: true prevents users from setting
+				// this via an n8n expression — the operation choice is not data-driven.
+				displayName: 'Operation',
+				name: 'operation',
+				type: 'options',
+				noDataExpression: true,
+				options: [
+					{
+						name: 'Execute Query',
+						value: 'executeQuery',
+						description: 'Execute one or more SQL statements',
+						action: 'Execute a query',
+					},
+				],
+				default: 'executeQuery',
 			},
+			...executeQueryDescription,
 		],
 	};
 
@@ -106,43 +122,40 @@ export class Exasol implements INodeType {
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
 		const credentials = await this.getCredentials('exasolApi');
 		const items = this.getInputData();
-		const returnData: INodeExecutionData[] = [];
+		// Read the operation from item 0 — operation is noDataExpression: true, meaning it cannot
+		// be set via an expression and is therefore identical for all items; item 0 is safe.
+		const operation = this.getNodeParameter('operation', 0) as string;
 
 		const driver = buildDriver(credentials as unknown as ExasolCredentials);
 
 		try {
-			await driver.connect();
-
-			for (let i = 0; i < items.length; i++) {
-				try {
-					const query = this.getNodeParameter('query', i) as string;
-					const result = await driver.query(query);
-					// getRows() converts Exasol's columnar wire format to {columnName: value} objects.
-					const rows = result.getRows();
-
-					returnData.push(
-						...rows.map((row) => ({
-							json: row,
-							pairedItem: { item: i },
-						})),
-					);
-				} catch (error) {
-					if (this.continueOnFail()) {
-						// Preserve the item index in the output so downstream nodes can identify failures.
-						returnData.push({
+			// Connection failures are separated from per-item failures: a broken connection
+			// affects all items, so we surface one error item per input item (not just item 0).
+			try {
+				await driver.connect();
+			} catch (error) {
+				if (this.continueOnFail()) {
+					return [
+						items.map((_, i) => ({
 							json: { error: (error as Error).message },
 							pairedItem: { item: i },
-						});
-						continue;
-					}
-					throw new NodeOperationError(this.getNode(), error as Error, { itemIndex: i });
+						})),
+					];
 				}
+				throw new NodeOperationError(this.getNode(), error as Error);
+			}
+
+			/* istanbul ignore else — only executeQuery exists; the else is a compile-time safety net */
+			if (operation === 'executeQuery') {
+				// Per-item errors inside executeQuery are handled there: it checks continueOnFail()
+				// and returns error items rather than throwing, so nothing re-wraps them here.
+				return [await executeQuery.call(this, driver, items)];
+			} else {
+				throw new NodeOperationError(this.getNode(), `Unknown operation: ${operation}`);
 			}
 		} finally {
-			// Always close the connection, even if an item threw and we bailed out early.
-			await driver.close();
+			// Suppress close() errors — the real error (if any) has already propagated above.
+			await driver.close().catch(() => {});
 		}
-
-		return [returnData];
 	}
 }
