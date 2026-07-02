@@ -4,12 +4,11 @@ Code name: Initial release
 
 ## Summary
 
-Initial release of the Exasol n8n community node. Provides credentials (host, port, user, password, schema) with live WebSocket connection testing and a single Execute Query operation for running raw SQL against an Exasol database.
+Initial release of the Exasol n8n community node.
 
 ## Features
 
-* Exasol credentials with live WebSocket credential test
-* Execute Query operation — raw SQL execution against Exasol
+* #5 Refactored to the n8n operation model.
 
 ## Dependency Updates
 
