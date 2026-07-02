@@ -92,11 +92,11 @@ describe('Execute Query operation', () => {
 
 		// Verify the row is actually in the database via a direct connection query.
 		const rows = (
-			await connection.query(`SELECT SERIES, YEAR FROM ${schema}.COMPETITIONS ORDER BY SERIES`)
+			await connection.query(`SELECT SERIES, SEASON FROM ${schema}.COMPETITIONS ORDER BY SERIES`)
 		).getRows();
 		expect(rows).toHaveLength(1);
 		expect(rows[0].SERIES).toBe('FIS WC');
-		expect(Number(rows[0].YEAR)).toBe(2024);
+		expect(Number(rows[0].SEASON)).toBe(2024);
 	});
 
 	it('parameterized SELECT filters rows with a bound value', async () => {

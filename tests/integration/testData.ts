@@ -70,7 +70,7 @@ async function createTables(driver: ExasolDriver, schema: string): Promise<void>
 	await driver.execute(`
 		CREATE TABLE ${schema}.COMPETITIONS (
 			SERIES          VARCHAR(500) UTF8,
-			YEAR            DECIMAL(18,0),
+			SEASON          DECIMAL(18,0),
 			RESORT_ID       DECIMAL(18,0),
 			COMPETITION_RUN VARCHAR(200) UTF8,
 			CONSTRAINT COMPETITION_FK FOREIGN KEY (RESORT_ID, COMPETITION_RUN)
