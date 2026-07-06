@@ -876,10 +876,11 @@ describe('execute()', () => {
 			expect(item.json).toEqual({ affectedRows: 0 });
 		});
 
-		it('throws NodeOperationError when the batch returns fewer results than items (e.g. a DDL statement produced none)', async () => {
-			// mapSingleResult's own comment documents that certain DDL statements produce
-			// zero entries in the results array. With 3 items but only 2 results, results
-			// can no longer be safely mapped back to items by position.
+		it('throws NodeOperationError when the batch returns fewer results than items', async () => {
+			// Defensive guard for a hypothetical driver response, not a confirmed Exasol
+			// behavior: with 3 items but only 2 results, results can no longer be safely
+			// mapped back to items by position, so this must fail loudly rather than
+			// silently attribute a result to the wrong item.
 			mockDriver.executeBatch.mockResolvedValue({
 				status: 'ok',
 				responseData: {
@@ -894,7 +895,7 @@ describe('execute()', () => {
 			const ctx = makeContext({
 				items: [{ json: {} }, { json: {} }, { json: {} }],
 				executionMode: 'single',
-				query: ['CREATE TABLE t (id INTEGER)', 'INSERT INTO t VALUES (1)', 'INSERT INTO t VALUES (2)'],
+				query: ['INSERT INTO t VALUES (0)', 'INSERT INTO t VALUES (1)', 'INSERT INTO t VALUES (2)'],
 			});
 			const thrown = await node.execute.call(ctx).catch((e) => e);
 

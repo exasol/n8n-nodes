@@ -270,14 +270,17 @@ async function executeBatched(
 			throw new Error(response.exception?.text || 'Batch execution failed');
 		}
 		const results = response.responseData?.results ?? [];
-		// A statement can contribute a different number of entries than 1 to the shared
-		// results array (mapSingleResult's own comment documents this for DDL). With a
-		// single item there's no ambiguity — whatever came back belongs to that item —
-		// but with more than one, a count mismatch means results can't be safely mapped
-		// back to items by position, so fail loudly instead of silently misattributing.
+		// Defensive guard, not a known failure mode: mapSingleResult's own comment notes
+		// that a single query can come back with an empty results array for certain DDL
+		// (unconfirmed whether this ever happens mid-batch — a live test against a real
+		// Exasol instance with CREATE TABLE + INSERT did not reproduce it). With a single
+		// item there's no ambiguity regardless — whatever came back belongs to that item —
+		// but with more than one, a count mismatch would mean results can't be safely
+		// mapped back to items by position, so fail loudly rather than risk silently
+		// misattributing a result to the wrong item.
 		if (items.length > 1 && results.length !== items.length) {
 			throw new Error(
-				`Single Batch mode expects one result per item, but the batch returned ${results.length} result(s) for ${items.length} item(s). This can happen when a statement (e.g. DDL) produces a variable number of results — use Sequentially or Transaction mode instead.`,
+				`Single Batch mode expects one result per item, but the batch returned ${results.length} result(s) for ${items.length} item(s). Use Sequentially or Transaction mode instead.`,
 			);
 		}
 		return items.flatMap((_, i) => mapSingleResult(results[i], i));

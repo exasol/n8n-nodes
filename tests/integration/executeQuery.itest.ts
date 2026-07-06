@@ -229,10 +229,11 @@ describe('Execute Query operation', () => {
 		expect(result[1].pairedItem).toEqual({ item: 1 });
 	});
 
-	it('single mode throws when a DDL statement in the batch produces a different result count than items', async () => {
-		// mapSingleResult's own comment documents that certain DDL statements produce
-		// zero entries in the results array, which would otherwise silently shift every
-		// later item's result by one position.
+	it('single mode successfully batches a DDL statement together with a DML statement', async () => {
+		// Confirms against a real Exasol instance that a CREATE TABLE statement
+		// contributes exactly one entry to a batch's results array — same as any DML
+		// statement — so the item-count guard in executeBatched does not spuriously
+		// reject a batch mixing DDL and DML.
 		const ctx = buildExecuteFunctions({
 			container: fixture.container,
 			items: [{ json: {} }, { json: {} }],
@@ -244,10 +245,18 @@ describe('Execute Query operation', () => {
 				]),
 			},
 		});
+		const [result] = await new Exasol().execute.call(ctx);
 
-		const thrown = await new Exasol().execute.call(ctx).catch((e) => e);
+		expect(result).toEqual([
+			{ json: { affectedRows: 0 }, pairedItem: { item: 0 } },
+			{ json: { affectedRows: 1 }, pairedItem: { item: 1 } },
+		]);
 
-		expect(thrown).toBeInstanceOf(NodeOperationError);
-		expect((thrown as NodeOperationError).message).toContain('one result per item');
+		const rows = (
+			await fixture.connection.query(
+				`SELECT COUNT(*) AS N FROM ${fixture.schema}.TMP_SINGLE_BATCH`,
+			)
+		).getRows();
+		expect(Number(rows[0].N)).toBe(1);
 	});
 });
