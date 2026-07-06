@@ -3,17 +3,18 @@ import { NodeOperationError } from 'n8n-workflow';
 
 import type { ExasolDriver, ResultSet, SQLQueryResponse } from '@exasol/exasol-driver-ts';
 
+// A single Exasol cell value as returned over the WebSocket protocol.
+type ExasolColumnValue = string | number | boolean | null;
+
 // Converts the columnar ResultSet wire format from the Exasol WebSocket protocol
 // into an array of row objects keyed by column name. The driver stores result data
 // as data[columnIndex][rowIndex] (column-major); this pivots it to the row-major
 // shape that n8n expects.
-function resultSetToRows(
-	resultSet: ResultSet,
-): Array<Record<string, string | number | boolean | null>> {
+function resultSetToRows(resultSet: ResultSet): Array<Record<string, ExasolColumnValue>> {
 	const { columns, data, numRows } = resultSet;
 	if (!data || numRows === 0) return [];
 	return Array.from({ length: numRows }, (_, rowIdx) => {
-		const row: Record<string, string | number | boolean | null> = {};
+		const row: Record<string, ExasolColumnValue> = {};
 		columns.forEach((col, colIdx) => {
 			row[col.name] = data[colIdx]?.[rowIdx] ?? null;
 		});
@@ -173,7 +174,9 @@ async function executeTransaction(
 		await driver.execute('ROLLBACK').catch(() => {});
 		// continueOnFail: transaction mode is atomic, so the whole transaction becomes one error item.
 		if (context.continueOnFail()) {
-			return [{ json: { error: (error as Error).message }, pairedItem: { item: currentItemIndex } }];
+			return [
+				{ json: { error: (error as Error).message }, pairedItem: { item: currentItemIndex } },
+			];
 		}
 		// Re-throw NodeOperationErrors as-is — readQuery already set the correct itemIndex.
 		// eslint-disable-next-line @n8n/community-nodes/require-node-api-error -- already a NodeOperationError; rule cannot track instanceof narrowing

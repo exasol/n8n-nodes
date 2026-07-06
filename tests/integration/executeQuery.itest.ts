@@ -1,45 +1,16 @@
-import type { StartedTestContainer } from 'testcontainers';
-
 import { Exasol } from '../../nodes/Exasol/Exasol.node';
-import { startExasolContainer, CONTAINER_HOOK_TIMEOUT_MS } from './containerSetup';
-import {
-	buildExecuteFunctions,
-	createSchema,
-	dropSchema,
-	openConnection,
-	perItem,
-} from './nodeTestHelper';
+import { useExasolTestFixture } from './fixtures';
+import { buildExecuteFunctions, perItem } from './nodeTestHelper';
 import { setupTestData } from './testData';
-import type { ExasolDriver } from '@exasol/exasol-driver-ts';
 
 describe('Execute Query operation', () => {
-	let container: StartedTestContainer;
-	let connection: ExasolDriver;
-	let schema: string;
-
-	beforeAll(async () => {
-		container = await startExasolContainer();
-		connection = await openConnection(container);
-	}, CONTAINER_HOOK_TIMEOUT_MS);
-
-	beforeEach(async () => {
-		schema = await createSchema(connection);
-		await setupTestData(connection, schema);
-	});
-
-	afterEach(async () => {
-		await dropSchema(connection, schema);
-	});
-
-	afterAll(async () => {
-		await connection.close();
-	});
+	const fixture = useExasolTestFixture({ setupData: setupTestData });
 
 	// ── Basic execution ─────────────────────────────────────────────────────────
 
 	it('executes SELECT 1 and returns a row', async () => {
 		const ctx = buildExecuteFunctions({
-			container,
+			container: fixture.container,
 			params: { query: 'SELECT 1 AS N' },
 		});
 		const [[item]] = await new Exasol().execute.call(ctx);
@@ -51,9 +22,9 @@ describe('Execute Query operation', () => {
 		// No parameters → raw path; INSERT is non-SELECT → driver.query(..., 'raw') → rowCount.
 		// COMPETITIONS references SKI_RUN via FK; (1000, 'Christine') is a valid pair.
 		const ctx = buildExecuteFunctions({
-			container,
+			container: fixture.container,
 			params: {
-				query: `INSERT INTO ${schema}.COMPETITIONS VALUES ('FIS WC', 2024, 1000, 'Christine')`,
+				query: `INSERT INTO ${fixture.schema}.COMPETITIONS VALUES ('FIS WC', 2024, 1000, 'Christine')`,
 			},
 		});
 		const [[item]] = await new Exasol().execute.call(ctx);
@@ -65,9 +36,9 @@ describe('Execute Query operation', () => {
 
 	it('parameterized INSERT returns { affectedRows: 1 }', async () => {
 		const ctx = buildExecuteFunctions({
-			container,
+			container: fixture.container,
 			params: {
-				query: `INSERT INTO ${schema}.COMPETITIONS VALUES (?, ?, ?, ?)`,
+				query: `INSERT INTO ${fixture.schema}.COMPETITIONS VALUES (?, ?, ?, ?)`,
 				parameters: {
 					values: [{ value: 'FIS WC' }, { value: 2024 }, { value: 1000 }, { value: 'Christine' }],
 				},
@@ -80,9 +51,9 @@ describe('Execute Query operation', () => {
 
 	it('parameterized INSERT then SELECT verifies round-trip', async () => {
 		const insertCtx = buildExecuteFunctions({
-			container,
+			container: fixture.container,
 			params: {
-				query: `INSERT INTO ${schema}.COMPETITIONS VALUES (?, ?, ?, ?)`,
+				query: `INSERT INTO ${fixture.schema}.COMPETITIONS VALUES (?, ?, ?, ?)`,
 				parameters: {
 					values: [{ value: 'FIS WC' }, { value: 2024 }, { value: 1000 }, { value: 'Christine' }],
 				},
@@ -92,7 +63,9 @@ describe('Execute Query operation', () => {
 
 		// Verify the row is actually in the database via a direct connection query.
 		const rows = (
-			await connection.query(`SELECT SERIES, SEASON FROM ${schema}.COMPETITIONS ORDER BY SERIES`)
+			await fixture.connection.query(
+				`SELECT SERIES, SEASON FROM ${fixture.schema}.COMPETITIONS ORDER BY SERIES`,
+			)
 		).getRows();
 		expect(rows).toHaveLength(1);
 		expect(rows[0].SERIES).toBe('FIS WC');
@@ -102,9 +75,9 @@ describe('Execute Query operation', () => {
 	it('parameterized SELECT filters rows with a bound value', async () => {
 		// SKI_RESORT is pre-populated by setupTestData with three resorts; select one by ID.
 		const ctx = buildExecuteFunctions({
-			container,
+			container: fixture.container,
 			params: {
-				query: `SELECT RESORT_ID, RESORT_NAME FROM ${schema}.SKI_RESORT WHERE RESORT_ID = ?`,
+				query: `SELECT RESORT_ID, RESORT_NAME FROM ${fixture.schema}.SKI_RESORT WHERE RESORT_ID = ?`,
 				parameters: { values: [{ value: 1000 }] },
 			},
 		});
@@ -119,20 +92,20 @@ describe('Execute Query operation', () => {
 
 	it('transaction mode commits all items when all succeed', async () => {
 		const ctx = buildExecuteFunctions({
-			container,
+			container: fixture.container,
 			items: [{ json: {} }, { json: {} }],
 			params: {
 				executionMode: 'transaction',
 				query: perItem([
-					`INSERT INTO ${schema}.COMPETITIONS VALUES ('FIS WC', 2024, 1000, 'Christine')`,
-					`INSERT INTO ${schema}.COMPETITIONS VALUES ('FIS WC', 2024, 1000, 'Allamande')`,
+					`INSERT INTO ${fixture.schema}.COMPETITIONS VALUES ('FIS WC', 2024, 1000, 'Christine')`,
+					`INSERT INTO ${fixture.schema}.COMPETITIONS VALUES ('FIS WC', 2024, 1000, 'Allamande')`,
 				]),
 			},
 		});
 		await new Exasol().execute.call(ctx);
 
 		const rows = (
-			await connection.query(`SELECT COUNT(*) AS N FROM ${schema}.COMPETITIONS`)
+			await fixture.connection.query(`SELECT COUNT(*) AS N FROM ${fixture.schema}.COMPETITIONS`)
 		).getRows();
 		expect(Number(rows[0].N)).toBe(2);
 	});
@@ -140,12 +113,12 @@ describe('Execute Query operation', () => {
 	it('transaction mode rolls back all items when any item fails', async () => {
 		// item 0 inserts a valid row; item 1 runs invalid SQL — both must be rolled back.
 		const ctx = buildExecuteFunctions({
-			container,
+			container: fixture.container,
 			items: [{ json: {} }, { json: {} }],
 			params: {
 				executionMode: 'transaction',
 				query: perItem([
-					`INSERT INTO ${schema}.COMPETITIONS VALUES ('FIS WC', 2024, 1000, 'Christine')`,
+					`INSERT INTO ${fixture.schema}.COMPETITIONS VALUES ('FIS WC', 2024, 1000, 'Christine')`,
 					'THIS IS INVALID SQL THAT WILL FAIL',
 				]),
 			},
@@ -155,7 +128,7 @@ describe('Execute Query operation', () => {
 
 		// The INSERT from item 0 must have been rolled back.
 		const rows = (
-			await connection.query(`SELECT COUNT(*) AS N FROM ${schema}.COMPETITIONS`)
+			await fixture.connection.query(`SELECT COUNT(*) AS N FROM ${fixture.schema}.COMPETITIONS`)
 		).getRows();
 		expect(Number(rows[0].N)).toBe(0);
 	});
