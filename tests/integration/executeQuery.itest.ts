@@ -1,3 +1,5 @@
+import { NodeOperationError } from 'n8n-workflow';
+
 import { Exasol } from '../../nodes/Exasol/Exasol.node';
 import { useExasolTestFixture } from './fixtures';
 import { buildExecuteFunctions, perItem } from './nodeTestHelper';
@@ -131,5 +133,121 @@ describe('Execute Query operation', () => {
 			await fixture.connection.query(`SELECT COUNT(*) AS N FROM ${fixture.schema}.COMPETITIONS`)
 		).getRows();
 		expect(Number(rows[0].N)).toBe(0);
+	});
+
+	// ── Single Batch mode ───────────────────────────────────────────────────────
+
+	it('single mode sends a batch of 3 INSERTs and returns 3 affectedRows results', async () => {
+		const ctx = buildExecuteFunctions({
+			container: fixture.container,
+			items: [{ json: {} }, { json: {} }, { json: {} }],
+			params: {
+				executionMode: 'single',
+				query: perItem([
+					`INSERT INTO ${fixture.schema}.COMPETITIONS VALUES ('FIS WC', 2024, 1000, 'Christine')`,
+					`INSERT INTO ${fixture.schema}.COMPETITIONS VALUES ('FIS WC', 2024, 1000, 'Allamande')`,
+					`INSERT INTO ${fixture.schema}.COMPETITIONS VALUES ('FIS WC', 2024, 1001, 'Chanrossa')`,
+				]),
+			},
+		});
+		const [result] = await new Exasol().execute.call(ctx);
+
+		expect(result).toEqual([
+			{ json: { affectedRows: 1 }, pairedItem: { item: 0 } },
+			{ json: { affectedRows: 1 }, pairedItem: { item: 1 } },
+			{ json: { affectedRows: 1 }, pairedItem: { item: 2 } },
+		]);
+
+		const rows = (
+			await fixture.connection.query(`SELECT COUNT(*) AS N FROM ${fixture.schema}.COMPETITIONS`)
+		).getRows();
+		expect(Number(rows[0].N)).toBe(3);
+	});
+
+	it('single mode surfaces one batch-wide error (attributed to item 0) when the batch contains invalid SQL', async () => {
+		// item 0 would insert a valid row; item 1 runs invalid SQL. The whole batch
+		// fails as one call — there is no per-item retry, so item 0's insert never
+		// happens either, and the error can't be attributed to the real culprit (item 1).
+		const ctx = buildExecuteFunctions({
+			container: fixture.container,
+			items: [{ json: {} }, { json: {} }],
+			params: {
+				executionMode: 'single',
+				query: perItem([
+					`INSERT INTO ${fixture.schema}.COMPETITIONS VALUES ('FIS WC', 2024, 1000, 'Christine')`,
+					'THIS IS INVALID SQL THAT WILL FAIL',
+				]),
+			},
+		});
+
+		const thrown = await new Exasol().execute.call(ctx).catch((e) => e);
+
+		expect(thrown).toBeInstanceOf(NodeOperationError);
+		expect((thrown as NodeOperationError).context?.itemIndex).toBe(0);
+
+		const rows = (
+			await fixture.connection.query(`SELECT COUNT(*) AS N FROM ${fixture.schema}.COMPETITIONS`)
+		).getRows();
+		expect(Number(rows[0].N)).toBe(0);
+	});
+
+	it('single mode falls back to per-item execution when an item uses Parameters', async () => {
+		const ctx = buildExecuteFunctions({
+			container: fixture.container,
+			params: {
+				executionMode: 'single',
+				query: `INSERT INTO ${fixture.schema}.COMPETITIONS VALUES (?, ?, ?, ?)`,
+				parameters: {
+					values: [{ value: 'FIS WC' }, { value: 2024 }, { value: 1000 }, { value: 'Christine' }],
+				},
+			},
+		});
+		const [[item]] = await new Exasol().execute.call(ctx);
+
+		expect(item.json).toEqual({ affectedRows: 1 });
+	});
+
+	it('single mode returns one error item per input item (same message) when continueOnFail is true and the batch fails', async () => {
+		const ctx = buildExecuteFunctions({
+			container: fixture.container,
+			items: [{ json: {} }, { json: {} }],
+			params: {
+				executionMode: 'single',
+				query: perItem([
+					`INSERT INTO ${fixture.schema}.COMPETITIONS VALUES ('FIS WC', 2024, 1000, 'Christine')`,
+					'THIS IS INVALID SQL THAT WILL FAIL',
+				]),
+			},
+			continueOnFail: true,
+		});
+		const [result] = await new Exasol().execute.call(ctx);
+
+		expect(result).toHaveLength(2);
+		expect(result[0].json).toMatchObject({ error: expect.any(String) });
+		expect(result[1].json).toEqual(result[0].json);
+		expect(result[0].pairedItem).toEqual({ item: 0 });
+		expect(result[1].pairedItem).toEqual({ item: 1 });
+	});
+
+	it('single mode throws when a DDL statement in the batch produces a different result count than items', async () => {
+		// mapSingleResult's own comment documents that certain DDL statements produce
+		// zero entries in the results array, which would otherwise silently shift every
+		// later item's result by one position.
+		const ctx = buildExecuteFunctions({
+			container: fixture.container,
+			items: [{ json: {} }, { json: {} }],
+			params: {
+				executionMode: 'single',
+				query: perItem([
+					`CREATE TABLE ${fixture.schema}.TMP_SINGLE_BATCH (ID INTEGER)`,
+					`INSERT INTO ${fixture.schema}.TMP_SINGLE_BATCH VALUES (1)`,
+				]),
+			},
+		});
+
+		const thrown = await new Exasol().execute.call(ctx).catch((e) => e);
+
+		expect(thrown).toBeInstanceOf(NodeOperationError);
+		expect((thrown as NodeOperationError).message).toContain('one result per item');
 	});
 });

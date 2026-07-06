@@ -11,6 +11,7 @@ Initial release of the Exasol n8n community node.
 * #5: Refactored to the n8n operation model.
 * #6: Added integration test infrastructure.
 * #7: Implemented parameterized execute query.
+* #17: Added Single Batch execution mode to Execute Query, sending all parameter-free items in one `executeBatch()` round-trip (falls back to Sequentially when parameters are present; any failure — including a result count that can't be mapped back to items, e.g. from a DDL statement — is reported as a failure of every item with the same message, never attributed to a specific one).
 
 ## Dependency Updates
 
