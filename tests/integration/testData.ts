@@ -45,9 +45,9 @@ async function createTables(driver: ExasolDriver, schema: string): Promise<void>
 	await driver.execute(`
 		CREATE TABLE ${schema}.SKI_RUN (
 			RESORT_ID  DECIMAL(18,0),
-			RUN_NAME   VARCHAR(200) UTF8,
-			DIFFICULTY VARCHAR(10) UTF8,
-			LENGTH     DECIMAL(18,0),
+			RUN_NAME    VARCHAR(200) UTF8,
+			DIFFICULTY  VARCHAR(10) UTF8,
+			RUN_LENGTH  DECIMAL(18,0),
 			CONSTRAINT SKI_RUN_PK  PRIMARY KEY (RESORT_ID, RUN_NAME),
 			CONSTRAINT RESORT_FK   FOREIGN KEY (RESORT_ID)
 				REFERENCES ${schema}.SKI_RESORT (RESORT_ID)
@@ -63,14 +63,14 @@ async function createTables(driver: ExasolDriver, schema: string): Promise<void>
 		`COMMENT ON COLUMN ${schema}.SKI_RUN.DIFFICULTY IS 'the run difficulty level - green, blue, red, black'`,
 	);
 	await driver.execute(
-		`COMMENT ON COLUMN ${schema}.SKI_RUN.LENGTH IS 'the run length in meters'`,
+		`COMMENT ON COLUMN ${schema}.SKI_RUN.RUN_LENGTH IS 'the run length in meters'`,
 	);
 
 	// Junction table: competitions held at a specific run; starts with no rows.
 	await driver.execute(`
 		CREATE TABLE ${schema}.COMPETITIONS (
 			SERIES          VARCHAR(500) UTF8,
-			YEAR            DECIMAL(18,0),
+			SEASON          DECIMAL(18,0),
 			RESORT_ID       DECIMAL(18,0),
 			COMPETITION_RUN VARCHAR(200) UTF8,
 			CONSTRAINT COMPETITION_FK FOREIGN KEY (RESORT_ID, COMPETITION_RUN)
@@ -103,21 +103,19 @@ async function insertRows(driver: ExasolDriver, schema: string): Promise<void> {
 }
 
 async function createViews(driver: ExasolDriver, schema: string): Promise<void> {
+	// Exasol does not support standalone COMMENT ON VIEW. The comment must be
+	// placed after the AS (...) body: CREATE VIEW name AS (...) COMMENT IS '...'
 	await driver.execute(`
-		CREATE VIEW ${schema}.HIGH_ALTITUDE_RESORT AS
+		CREATE VIEW ${schema}.HIGH_ALTITUDE_RESORT AS (
 			SELECT * FROM ${schema}.SKI_RESORT WHERE ALTITUDE > 2000
+		) COMMENT IS 'ski resorts situated at the altitude higher than 2000 meters'
 	`);
-	await driver.execute(
-		`COMMENT ON VIEW ${schema}.HIGH_ALTITUDE_RESORT IS 'ski resorts situated at the altitude higher than 2000 meters'`,
-	);
 
 	await driver.execute(`
-		CREATE VIEW ${schema}.DIFFICULT_RUN AS
+		CREATE VIEW ${schema}.DIFFICULT_RUN AS (
 			SELECT * FROM ${schema}.SKI_RUN WHERE UPPER(DIFFICULTY) = 'BLACK'
+		) COMMENT IS 'the view lists all known black runs'
 	`);
-	await driver.execute(
-		`COMMENT ON VIEW ${schema}.DIFFICULT_RUN IS 'the view lists all known black runs'`,
-	);
 }
 
 async function createFunctions(driver: ExasolDriver, schema: string): Promise<void> {

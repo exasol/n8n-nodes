@@ -1,8 +1,25 @@
 import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainers';
 
+// exasol/docker-db uses a self-signed TLS certificate. The Exasol WebSocket driver
+// connects via wss:// and would fail with E-EDJS-1 if the cert is rejected.
+// ws calls tls.connect() directly (bypassing https.request), so the env var alone
+// does not disable cert validation — Exasol.node.ts and openConnection() each read
+// it explicitly and forward rejectUnauthorized: false to the WebSocket constructor.
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 const DOCKER_IMAGE = 'exasol/docker-db:2026.1.0';
 // 3 minutes: the documented startup is ~2 min; the extra minute absorbs slow CI runners.
 const STARTUP_TIMEOUT_MS = 3 * 60 * 1000;
+
+/**
+ * The minimum Jest hook timeout (in ms) for any `beforeAll` that calls
+ * `startExasolContainer`. Pass this as the second argument to `beforeAll`
+ * to prevent Jest from killing the hook before the container is ready.
+ *
+ * Adds a 30-second buffer on top of the container startup timeout to allow
+ * for `openConnection` and other setup work.
+ */
+export const CONTAINER_HOOK_TIMEOUT_MS = STARTUP_TIMEOUT_MS + 30_000;
 
 /**
  * Starts an Exasol Docker container for integration tests.
