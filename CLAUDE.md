@@ -56,6 +56,7 @@ nodes/Exasol/
     shared/
       whereBuilder.ts     ← parameterized WHERE clause generator (Select, Update, Delete)
       mergeBuilder.ts     ← MERGE SQL generator (Upsert)
+      resultMapper.ts     ← column-major ResultSet → row-object pivot (Execute Query, Select Rows)
 
 tests/
   unit/

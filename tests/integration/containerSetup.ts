@@ -22,6 +22,24 @@ const STARTUP_TIMEOUT_MS = 3 * 60 * 1000;
 export const CONTAINER_HOOK_TIMEOUT_MS = STARTUP_TIMEOUT_MS + 30_000;
 
 /**
+ * Points integration tests at an Exasol instance that is already running (e.g. in a VM or a
+ * colleague's machine) instead of starting a local Docker container — for development machines
+ * where Docker itself isn't available. Only `getHost()`/`getMappedPort()` are ever called on the
+ * returned value (see `getContainerCredentials` in nodeTestHelper.ts), so a plain object
+ * satisfying those two methods stands in for a real `StartedTestContainer`.
+ */
+function externalContainerFromEnv(): StartedTestContainer | undefined {
+	const host = process.env.EXASOL_TEST_HOST;
+	const port = process.env.EXASOL_TEST_PORT;
+	if (!host || !port) return undefined;
+
+	return {
+		getHost: () => host,
+		getMappedPort: () => Number(port),
+	} as unknown as StartedTestContainer;
+}
+
+/**
  * Starts an Exasol Docker container for integration tests.
  *
  * Uses `testcontainers` to pull and start `exasol/docker-db`. The container
@@ -29,9 +47,21 @@ export const CONTAINER_HOOK_TIMEOUT_MS = STARTUP_TIMEOUT_MS + 30_000;
  * `.withReuse()` keeps the container alive between local test runs so
  * subsequent runs skip the startup wait.
  *
+ * When `EXASOL_TEST_HOST` and `EXASOL_TEST_PORT` are both set, skips Docker entirely and
+ * connects to that instance instead (see `externalContainerFromEnv` above).
+ *
  * Call this in `beforeAll()` of any integration test suite.
  */
 export async function startExasolContainer(): Promise<StartedTestContainer> {
+	const external = externalContainerFromEnv();
+	if (external) {
+		console.log(
+			`Using external Exasol instance at ${process.env.EXASOL_TEST_HOST}:${process.env.EXASOL_TEST_PORT} ` +
+				'(EXASOL_TEST_HOST/EXASOL_TEST_PORT set) instead of starting a Docker container.',
+		);
+		return external;
+	}
+
 	const containerLog: string[] = [];
 
 	const container = new GenericContainer(DOCKER_IMAGE)

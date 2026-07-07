@@ -12,6 +12,7 @@ Initial release of the Exasol n8n community node.
 * #6: Added integration test infrastructure.
 * #7: Implemented parameterized execute query.
 * #17: Added Single Batch execution mode to Execute Query, sending all parameter-free items in one `executeBatch()` round-trip (falls back to Sequentially when parameters are present; any failure — including a result count that can't be mapped back to items, e.g. from a DDL statement — is reported as a failure of every item with the same message, never attributed to a specific one).
+* #8: Added the Select Rows operation — a structured SELECT built from a schema/table picker, WHERE conditions (with AND/OR combination), sort rules, and a row limit. Introduces two pieces shared by later operations: `loadOptions` methods (`listSchemas`, `listTables`) backing the schema/table pickers, and `whereBuilder.ts`, which generates parameterized WHERE clauses from condition collections.
 
 ## Dependency Updates
 

@@ -1,26 +1,9 @@
 import type { IExecuteFunctions, INodeExecutionData } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
 
-import type { ExasolDriver, ResultSet, SQLQueryResponse } from '@exasol/exasol-driver-ts';
+import type { ExasolDriver, SQLQueryResponse } from '@exasol/exasol-driver-ts';
 
-// A single Exasol cell value as returned over the WebSocket protocol.
-type ExasolColumnValue = string | number | boolean | null;
-
-// Converts the columnar ResultSet wire format from the Exasol WebSocket protocol
-// into an array of row objects keyed by column name. The driver stores result data
-// as data[columnIndex][rowIndex] (column-major); this pivots it to the row-major
-// shape that n8n expects.
-function resultSetToRows(resultSet: ResultSet): Array<Record<string, ExasolColumnValue>> {
-	const { columns, data, numRows } = resultSet;
-	if (!data || numRows === 0) return [];
-	return Array.from({ length: numRows }, (_, rowIdx) => {
-		const row: Record<string, ExasolColumnValue> = {};
-		columns.forEach((col, colIdx) => {
-			row[col.name] = data[colIdx]?.[rowIdx] ?? null;
-		});
-		return row;
-	});
-}
+import { resultSetToRows } from '../shared/resultMapper';
 
 // Reads the Parameters fixed-collection for one input item and returns the ordered
 // list of bound values. Returns [] when no parameters are configured (raw path).

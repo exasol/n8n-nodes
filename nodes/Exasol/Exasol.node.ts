@@ -2,18 +2,25 @@ import type {
 	ICredentialTestFunctions,
 	ICredentialsDecrypted,
 	IExecuteFunctions,
+	ILoadOptionsFunctions,
 	INodeCredentialTestResult,
 	INodeExecutionData,
+	INodePropertyOptions,
 	INodeType,
 	INodeTypeDescription,
 } from 'n8n-workflow';
 import { NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 
 import { ExasolDriver } from '@exasol/exasol-driver-ts';
-import type { ExaWebsocket } from '@exasol/exasol-driver-ts';
+import type { ExaWebsocket, SQLQueriesResponse, SQLResponse } from '@exasol/exasol-driver-ts';
 import WebSocket from 'ws';
 
-import { executeQueryDescription, executeQuery } from './operations';
+import {
+	executeQueryDescription,
+	executeQuery,
+	selectRowsDescription,
+	selectRows,
+} from './operations';
 
 // Shape of the ExasolApi credential fields (mirrors ExasolApi.credentials.ts properties).
 interface ExasolCredentials {
@@ -48,6 +55,17 @@ function buildDriver(creds: ExasolCredentials): ExasolDriver {
 	});
 }
 
+// Pulls the values of a single-column result set out of the raw SQLResponse shape returned by
+// stmt.execute() (used by listTables, whose WHERE ? binding rules out the friendlier
+// driver.query()-only QueryResult/getRows() helper). The Exasol wire format is column-major —
+// data[0] holds every row's value for the first (and here, only) selected column.
+function firstColumnValues(response: SQLResponse<SQLQueriesResponse>): string[] {
+	const result = response.responseData?.results?.[0];
+	if (result?.resultType !== 'resultSet' || !result.resultSet?.data) return [];
+	const { data, numRows } = result.resultSet;
+	return Array.from({ length: numRows }, (_, i) => data[0]?.[i] as string);
+}
+
 /**
  * n8n community node for Exasol. Implements INodeType — the interface n8n uses to discover,
  * configure, and execute community nodes. Provides credential testing and delegates workflow
@@ -63,7 +81,8 @@ export class Exasol implements INodeType {
 		description: 'Execute SQL queries against an Exasol database',
 		// For Execute Query the subtitle shows the SQL text (most informative per-operation value).
 		// For future operations this falls back to the raw operation key.
-		subtitle: '={{$parameter["operation"] === "executeQuery" ? $parameter["query"] : $parameter["operation"]}}',
+		subtitle:
+			'={{$parameter["operation"] === "executeQuery" ? $parameter["query"] : $parameter["operation"]}}',
 		defaults: {
 			name: 'Exasol',
 		},
@@ -96,11 +115,73 @@ export class Exasol implements INodeType {
 						description: 'Execute one or more SQL statements',
 						action: 'Execute a query',
 					},
+					{
+						name: 'Select Rows',
+						value: 'selectRows',
+						description: 'Select rows from a table using structured filters',
+						action: 'Select rows',
+					},
 				],
 				default: 'executeQuery',
 			},
 			...executeQueryDescription,
+			...selectRowsDescription,
 		],
+	};
+
+	// Populates the Schema / Table dropdowns in selectRows/description.ts (and reused by later
+	// operations). loadOptions methods run in the n8n editor UI, not during execute() — each one
+	// opens and closes its own short-lived connection rather than sharing execute()'s driver.
+	methods = {
+		loadOptions: {
+			async listSchemas(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+				const credentials = await this.getCredentials('exasolApi');
+				const driver = buildDriver(credentials as unknown as ExasolCredentials);
+				await driver.connect();
+				try {
+					const result = await driver.query(
+						'SELECT SCHEMA_NAME FROM EXA_ALL_SCHEMAS ORDER BY SCHEMA_NAME',
+					);
+					return result.getRows().map((row) => {
+						const name = row.SCHEMA_NAME as string;
+						return { name, value: name };
+					});
+				} finally {
+					await driver.close().catch(() => {});
+				}
+			},
+
+			async listTables(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+				// getCurrentNodeParameter (unlike getNodeParameter) reads the value currently set
+				// in the editor UI for this node, with no item index — loadOptions runs once per
+				// dropdown open, not once per input item.
+				const schema = this.getCurrentNodeParameter('schema') as string | undefined;
+				if (!schema) return [];
+
+				const credentials = await this.getCredentials('exasolApi');
+				const driver = buildDriver(credentials as unknown as ExasolCredentials);
+				await driver.connect();
+				try {
+					const stmt = await driver.prepare(
+						'SELECT TABLE_NAME FROM EXA_ALL_TABLES WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME',
+					);
+					try {
+						const response = await stmt.execute(schema);
+						if (response.status === 'error') {
+							throw new NodeOperationError(
+								this.getNode(),
+								response.exception?.text || 'Failed to list tables',
+							);
+						}
+						return firstColumnValues(response).map((name) => ({ name, value: name }));
+					} finally {
+						await stmt.close().catch(() => {});
+					}
+				} finally {
+					await driver.close().catch(() => {});
+				}
+			},
+		},
 	};
 
 	// Called by n8n when the user clicks "Test credential" in the credential UI.
@@ -152,11 +233,13 @@ export class Exasol implements INodeType {
 				throw new NodeOperationError(this.getNode(), error as Error);
 			}
 
-			/* istanbul ignore else — only executeQuery exists; the else is a compile-time safety net */
+			// Per-item errors inside each operation handler are handled there: they check
+			// continueOnFail() and return error items rather than throwing, so nothing re-wraps
+			// them here.
 			if (operation === 'executeQuery') {
-				// Per-item errors inside executeQuery are handled there: it checks continueOnFail()
-				// and returns error items rather than throwing, so nothing re-wraps them here.
 				return [await executeQuery.call(this, driver, items)];
+			} else if (operation === 'selectRows') {
+				return [await selectRows.call(this, driver, items)];
 			} else {
 				throw new NodeOperationError(this.getNode(), `Unknown operation: ${operation}`);
 			}
