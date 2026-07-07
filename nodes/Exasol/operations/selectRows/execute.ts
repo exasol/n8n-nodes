@@ -91,7 +91,7 @@ function requireSortDirection(direction: unknown): 'ASC' | 'DESC' {
 // this guard an empty column would reach quoteIdentifier() unchecked, producing `ORDER BY ""`
 // and an opaque Exasol syntax error instead of a clear validation message.
 function requireSortColumn(column: string): string {
-	if (!column || !column.trim()) {
+	if (!column?.trim()) {
 		throw new Error('Sort column must not be empty.');
 	}
 	return column;

@@ -70,7 +70,9 @@ const KNOWN_OPERATORS: ReadonlySet<string> = new Set(Object.keys(OPERATOR_SQL));
  * quotes to inject arbitrary SQL, since identifiers can't otherwise be bound as `?` parameters.
  */
 export function quoteIdentifier(identifier: string): string {
-	return `"${identifier.replace(/"/g, '""')}"`;
+	// Sonar prefers String#replaceAll here, but tsconfig.json targets es2019 without the ES2021
+	// lib, so replaceAll isn't available; the /g regex below is functionally equivalent.
+	return `"${identifier.replace(/"/g, '""')}"`; // NOSONAR
 }
 
 /**
@@ -112,7 +114,7 @@ export function buildWhereClause(
 		// an n8n expression can still resolve it to '' at runtime. Without this guard an empty
 		// column would reach quoteIdentifier() unchecked, producing `WHERE "" = ?` and an opaque
 		// Exasol syntax error instead of a clear validation message.
-		if (!condition.column || !condition.column.trim()) {
+		if (!condition.column?.trim()) {
 			throw new Error('Where column must not be empty.');
 		}
 		const column = quoteIdentifier(condition.column);
@@ -124,5 +126,6 @@ export function buildWhereClause(
 		return `${column} ${operatorSql} ?`;
 	});
 
-	return { clause: `WHERE ${fragments.join(` ${combinator} `)}`, params };
+	const separator = ` ${combinator} `;
+	return { clause: `WHERE ${fragments.join(separator)}`, params };
 }
