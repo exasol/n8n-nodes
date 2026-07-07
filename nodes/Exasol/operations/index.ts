@@ -2,3 +2,5 @@ export { description as executeQueryDescription } from './executeQuery/descripti
 export { execute as executeQuery } from './executeQuery/execute';
 export { description as selectRowsDescription } from './selectRows/description';
 export { execute as selectRows } from './selectRows/execute';
+export { description as insertDescription } from './insert/description';
+export { execute as insert } from './insert/execute';
