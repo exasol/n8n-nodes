@@ -157,5 +157,10 @@ export function buildExecuteFunctions(opts: ExecuteFunctionsOpts): IExecuteFunct
 		continueOnFail: jest.fn().mockReturnValue(opts.continueOnFail ?? false),
 
 		getNode: jest.fn().mockReturnValue({ name: 'Exasol', type: 'exasol' }),
+
+		// addExecutionHints surfaces a non-fatal warning in the n8n UI — e.g. when
+		// Single Batch mode falls back to per-item execution. Not asserted on in
+		// most tests, but must exist so the node code can call it without throwing.
+		addExecutionHints: jest.fn(),
 	} as unknown as IExecuteFunctions;
 }

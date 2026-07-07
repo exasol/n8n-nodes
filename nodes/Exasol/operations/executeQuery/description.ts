@@ -77,6 +77,12 @@ export const description: INodeProperties[] = [
 				description:
 					'All input items execute in a single DB transaction; any failure rolls back all',
 			},
+			{
+				name: 'Single Batch',
+				value: 'single',
+				description:
+					'All input items are sent in one batch (one round-trip); only works when no item uses Parameters (falls back to Sequentially otherwise); if the batch fails, every item is reported as failed with the same error, since it cannot be attributed to a specific one',
+			},
 		],
 		default: 'sequentially',
 		description: 'How to handle multiple input items',

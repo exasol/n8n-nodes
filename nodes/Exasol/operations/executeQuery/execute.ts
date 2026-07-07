@@ -44,17 +44,16 @@ function readQuery(context: IExecuteFunctions, itemIndex: number): string {
 	return query;
 }
 
-// Maps the results array from a driver response to n8n execution data.
-// A valid 'ok' response can have an empty results array for certain DDL
-// statements; treated as zero affected rows rather than crashing on results[0].
-function mapResults(
-	results: SQLQueryResponse[] | undefined,
+// Maps one statement's result to n8n execution data for one input item. Missing
+// result (undefined) is treated as zero affected rows rather than crashing — a
+// valid 'ok' response can have an empty results array for certain DDL statements.
+function mapSingleResult(
+	result: SQLQueryResponse | undefined,
 	itemIndex: number,
 ): INodeExecutionData[] {
-	if (!results || results.length === 0) {
+	if (!result) {
 		return [{ json: { affectedRows: 0 }, pairedItem: { item: itemIndex } }];
 	}
-	const result = results[0];
 	if (result.resultType === 'resultSet' && result.resultSet) {
 		return resultSetToRows(result.resultSet).map((row) => ({
 			json: row,
@@ -62,6 +61,15 @@ function mapResults(
 		}));
 	}
 	return [{ json: { affectedRows: result.rowCount ?? 0 }, pairedItem: { item: itemIndex } }];
+}
+
+// Maps the results array from a driver response (one result per executed statement)
+// to n8n execution data for a single-statement call — always reads results[0].
+function mapResults(
+	results: SQLQueryResponse[] | undefined,
+	itemIndex: number,
+): INodeExecutionData[] {
+	return mapSingleResult(results?.[0], itemIndex);
 }
 
 // Executes one query for one input item, choosing the path based on whether
@@ -106,20 +114,38 @@ async function runQuery(
 	}
 }
 
-// Processes each item sequentially (no transaction). Per-item errors are caught
-// and either converted to error output items (continueOnFail) or re-thrown.
-async function executeSequentially(
+// Re-throws NodeOperationErrors as-is (already correctly attributed, e.g. by
+// readQuery); wraps any other error so every execution mode throws a consistent,
+// correctly-typed failure instead of a raw Error.
+function toNodeOperationError(
+	context: IExecuteFunctions,
+	error: unknown,
+	itemIndex: number,
+): NodeOperationError {
+	if (error instanceof NodeOperationError) return error;
+	return new NodeOperationError(context.getNode(), error as Error, { itemIndex });
+}
+
+// Processes each item sequentially (no transaction), sourcing each item's query and
+// params via getQueryAndParams. Per-item errors are caught and either converted to
+// error output items (continueOnFail) or re-thrown.
+//
+// getQueryAndParams is a callback rather than a plain array so that the common case
+// (executeSequentially below) can read each item's parameters lazily, one at a time,
+// exactly like the original per-item loop did — while executeBatched's fallback path
+// can instead pass in already-evaluated values, avoiding a second evaluation of any
+// n8n expression in the Query/Parameters fields.
+async function runSequentially(
 	context: IExecuteFunctions,
 	driver: ExasolDriver,
 	items: INodeExecutionData[],
+	getQueryAndParams: (itemIndex: number) => { query: string; params: unknown[] },
 ): Promise<INodeExecutionData[]> {
 	const returnData: INodeExecutionData[] = [];
 
 	for (let i = 0; i < items.length; i++) {
 		try {
-			// getNodeParameter evaluates per-item expressions (e.g. ={{$json.query}}).
-			const query = readQuery(context, i);
-			const params = extractParams(context, i);
+			const { query, params } = getQueryAndParams(i);
 			returnData.push(...(await runQuery(driver, query, params, i)));
 		} catch (error) {
 			// continueOnFail: capture the error as an output item rather than aborting.
@@ -130,14 +156,23 @@ async function executeSequentially(
 				});
 				continue;
 			}
-			// Re-throw NodeOperationErrors as-is — readQuery already set the correct itemIndex.
-			// eslint-disable-next-line @n8n/community-nodes/require-node-api-error -- already a NodeOperationError; rule cannot track instanceof narrowing
-			if (error instanceof NodeOperationError) throw error;
-			throw new NodeOperationError(context.getNode(), error as Error, { itemIndex: i });
+			throw toNodeOperationError(context, error, i);
 		}
 	}
 
 	return returnData;
+}
+
+async function executeSequentially(
+	context: IExecuteFunctions,
+	driver: ExasolDriver,
+	items: INodeExecutionData[],
+): Promise<INodeExecutionData[]> {
+	// getNodeParameter evaluates per-item expressions (e.g. ={{$json.query}}).
+	return runSequentially(context, driver, items, (i) => ({
+		query: readQuery(context, i),
+		params: extractParams(context, i),
+	}));
 }
 
 // Wraps all items in a single DB transaction. Either all succeed (COMMIT) or
@@ -178,12 +213,7 @@ async function executeTransaction(
 				{ json: { error: (error as Error).message }, pairedItem: { item: currentItemIndex } },
 			];
 		}
-		// Re-throw NodeOperationErrors as-is — readQuery already set the correct itemIndex.
-		// eslint-disable-next-line @n8n/community-nodes/require-node-api-error -- already a NodeOperationError; rule cannot track instanceof narrowing
-		if (error instanceof NodeOperationError) throw error;
-		throw new NodeOperationError(context.getNode(), error as Error, {
-			itemIndex: currentItemIndex,
-		});
+		throw toNodeOperationError(context, error, currentItemIndex);
 	} finally {
 		// Restore autocommit. COMMIT with autocommit: true sets the session flag without
 		// opening a new transaction. SELECT 1 cannot be used here because driver.execute()
@@ -192,10 +222,81 @@ async function executeTransaction(
 	}
 }
 
+// Sends every item's query in one driver.executeBatch() WebSocket round-trip instead
+// of one round-trip per item. Only static SQL can be batched — the driver's
+// executeBatch() takes plain strings with no place for bound ? parameters — so any
+// item using Parameters causes the whole run to fall back to per-item execution.
+//
+// Any failure — whether validating a query before the batch is even sent, the batch
+// call itself failing, or a result count that can't be mapped back to items — is
+// reported as one failure across the whole run, never attributed to a specific item:
+// Exasol's batch protocol returns one exception for the whole call with no indication
+// of which statement failed or how many already ran. Recovering that would require
+// wrapping the batch in a transaction and retrying item by item on failure — but that
+// serializes every write behind a transaction on the happy path too, undermining the
+// one-round-trip point of batching in the first place. n8n's own MySQL and Postgres
+// nodes make the same trade-off in their "Single" query-batching mode (Postgres
+// reports one undifferentiated error; MySQL hardcodes itemIndex: 0). continueOnFail
+// still emits one output item per input item — just all carrying the same message —
+// so downstream nodes see the item count they expect.
+async function executeBatched(
+	context: IExecuteFunctions,
+	driver: ExasolDriver,
+	items: INodeExecutionData[],
+): Promise<INodeExecutionData[]> {
+	if (items.length === 0) return [];
+
+	try {
+		// Read every item's query/params exactly once up front. The values are reused
+		// below whichever path is taken (batched or the Parameters fallback) so an n8n
+		// expression in Query or Parameters (e.g. ={{ $now }}) is never evaluated twice.
+		const queries = items.map((_, i) => readQuery(context, i));
+		const paramsByItem = items.map((_, i) => extractParams(context, i));
+
+		if (paramsByItem.some((params) => params.length > 0)) {
+			context.addExecutionHints({
+				message:
+					'Single Batch mode only supports parameter-free queries. Falling back to Sequentially because at least one item uses Parameters.',
+				type: 'warning',
+			});
+			return await runSequentially(context, driver, items, (i) => ({
+				query: queries[i],
+				params: paramsByItem[i],
+			}));
+		}
+
+		const response = await driver.executeBatch(queries);
+		if (response.status === 'error') {
+			throw new Error(response.exception?.text || 'Batch execution failed');
+		}
+		const results = response.responseData?.results ?? [];
+		// Defensive guard, not a known failure mode: mapSingleResult's own comment notes
+		// that a single query can come back with an empty results array for certain DDL
+		// (unconfirmed whether this ever happens mid-batch — a live test against a real
+		// Exasol instance with CREATE TABLE + INSERT did not reproduce it). With a single
+		// item there's no ambiguity regardless — whatever came back belongs to that item —
+		// but with more than one, a count mismatch would mean results can't be safely
+		// mapped back to items by position, so fail loudly rather than risk silently
+		// misattributing a result to the wrong item.
+		if (items.length > 1 && results.length !== items.length) {
+			throw new Error(
+				`Single Batch mode expects one result per item, but the batch returned ${results.length} result(s) for ${items.length} item(s). Use Sequentially or Transaction mode instead.`,
+			);
+		}
+		return items.flatMap((_, i) => mapSingleResult(results[i], i));
+	} catch (error) {
+		if (context.continueOnFail()) {
+			const message = (error as Error).message;
+			return items.map((_, i) => ({ json: { error: message }, pairedItem: { item: i } }));
+		}
+		throw toNodeOperationError(context, error, 0);
+	}
+}
+
 /**
  * Executes the "Execute Query" operation for all n8n input items.
  *
- * Dispatches to one of two execution strategies based on the executionMode
+ * Dispatches to one of three execution strategies based on the executionMode
  * parameter. Supports optional parameter binding via prepare() for ? placeholders.
  *
  * Called with `this` bound to IExecuteFunctions so n8n's per-item parameter
@@ -215,6 +316,9 @@ export async function execute(
 
 	if (executionMode === 'transaction') {
 		return executeTransaction(this, driver, items);
+	}
+	if (executionMode === 'single') {
+		return executeBatched(this, driver, items);
 	}
 	return executeSequentially(this, driver, items);
 }

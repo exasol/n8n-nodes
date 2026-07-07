@@ -17,6 +17,7 @@ type MockDriver = {
 	connect: jest.Mock;
 	query: jest.Mock;
 	execute: jest.Mock;
+	executeBatch: jest.Mock;
 	prepare: jest.Mock;
 	close: jest.Mock;
 };
@@ -72,6 +73,7 @@ describe('execute()', () => {
 			connect: jest.fn().mockResolvedValue(undefined),
 			query: jest.fn(),
 			execute: jest.fn().mockResolvedValue(0),
+			executeBatch: jest.fn(),
 			prepare: jest.fn().mockResolvedValue(mockStatement),
 			close: jest.fn().mockResolvedValue(undefined),
 		};
@@ -131,6 +133,7 @@ describe('execute()', () => {
 				}),
 			continueOnFail: jest.fn().mockReturnValue(opts.continueOnFail ?? false),
 			getNode: jest.fn().mockReturnValue({ name: 'Exasol', type: 'exasol' }),
+			addExecutionHints: jest.fn(),
 		} as unknown as IExecuteFunctions;
 	}
 
@@ -329,6 +332,16 @@ describe('execute()', () => {
 		mockDriver.query.mockResolvedValue({ status: 'ok' });
 
 		await expect(node.execute.call(makeContext())).rejects.toBeInstanceOf(NodeOperationError);
+	});
+
+	it('returns { affectedRows: 0 } when responseData exists but has no results property', async () => {
+		// Defensive edge case: responseData is present (so the "missing responseData" check
+		// above doesn't fire) but its results array is absent.
+		mockDriver.query.mockResolvedValue({ status: 'ok', responseData: {} });
+
+		const [[item]] = await node.execute.call(makeContext());
+
+		expect(item.json).toEqual({ affectedRows: 0 });
 	});
 
 	it('throws NodeOperationError for an empty query string', async () => {
@@ -651,6 +664,272 @@ describe('execute()', () => {
 
 			expect(item.json).toMatchObject({ error: expect.any(String) });
 			expect(mockDriver.execute).toHaveBeenCalledWith('ROLLBACK');
+		});
+	});
+
+	describe('single mode', () => {
+		it('sends all items in one executeBatch call and maps results by index', async () => {
+			mockDriver.executeBatch.mockResolvedValue({
+				status: 'ok',
+				responseData: {
+					numResults: 2,
+					results: [
+						{
+							resultType: 'resultSet',
+							resultSet: {
+								numColumns: 1,
+								numRows: 1,
+								numRowsInMessage: 1,
+								columns: [{ name: 'N', dataType: { type: 'DECIMAL' } }],
+								data: [[1]],
+							},
+						},
+						{ resultType: 'rowCount', rowCount: 1 },
+					],
+				},
+			});
+
+			const ctx = makeContext({
+				items: [{ json: {} }, { json: {} }],
+				executionMode: 'single',
+				query: ['SELECT 1 AS N', 'INSERT INTO t VALUES (2)'],
+			});
+			const [result] = await node.execute.call(ctx);
+
+			expect(mockDriver.executeBatch).toHaveBeenCalledWith([
+				'SELECT 1 AS N',
+				'INSERT INTO t VALUES (2)',
+			]);
+			expect(result[0].json).toEqual({ N: 1 });
+			expect(result[0].pairedItem).toEqual({ item: 0 });
+			expect(result[1].json).toEqual({ affectedRows: 1 });
+			expect(result[1].pairedItem).toEqual({ item: 1 });
+			expect(mockDriver.query).not.toHaveBeenCalled();
+			expect(mockDriver.prepare).not.toHaveBeenCalled();
+		});
+
+		it('returns an empty array for zero items without touching the driver', async () => {
+			const ctx = makeContext({ items: [], executionMode: 'single' });
+			const [result] = await node.execute.call(ctx);
+
+			expect(result).toEqual([]);
+			expect(mockDriver.executeBatch).not.toHaveBeenCalled();
+		});
+
+		it('does not open a transaction around the batch call', async () => {
+			// Single Batch mode intentionally has no transactional safety net — wrapping
+			// the batch in a transaction would serialize every write behind it even on
+			// the happy path, defeating the point of sending it in one round-trip.
+			mockDriver.executeBatch.mockResolvedValue({
+				status: 'ok',
+				responseData: { numResults: 1, results: [{ resultType: 'rowCount', rowCount: 1 }] },
+			});
+
+			const ctx = makeContext({ executionMode: 'single', query: 'INSERT INTO t VALUES (1)' });
+			await node.execute.call(ctx);
+
+			expect(mockDriver.execute).not.toHaveBeenCalled();
+		});
+
+		it('falls back to Sequentially and warns when an item uses Parameters', async () => {
+			mockStatement.execute.mockResolvedValue({
+				status: 'ok',
+				exception: undefined,
+				responseData: { numResults: 1, results: [{ resultType: 'rowCount', rowCount: 1 }] },
+			});
+
+			const ctx = makeContext({
+				executionMode: 'single',
+				query: 'INSERT INTO t VALUES (?)',
+				parameters: [{ value: 1 }],
+			});
+			const [[item]] = await node.execute.call(ctx);
+
+			expect(mockDriver.executeBatch).not.toHaveBeenCalled();
+			expect(mockDriver.prepare).toHaveBeenCalled();
+			expect(item.json).toEqual({ affectedRows: 1 });
+			expect(ctx.addExecutionHints).toHaveBeenCalledWith(
+				expect.objectContaining({ type: 'warning' }),
+			);
+		});
+
+		it("evaluates each item's Query expression only once even when falling back due to Parameters", async () => {
+			// Regression test: the fallback path used to re-read 'query'/'parameters' via
+			// executeSequentially's own readQuery/extractParams calls, evaluating any n8n
+			// expression in those fields a second time. Non-idempotent expressions (e.g.
+			// ={{ $now.toMillis() }}) would then resolve to a different value than the one
+			// used to decide whether to fall back in the first place.
+			mockStatement.execute.mockResolvedValue({
+				status: 'ok',
+				exception: undefined,
+				responseData: { numResults: 1, results: [{ resultType: 'rowCount', rowCount: 1 }] },
+			});
+
+			const ctx = makeContext({
+				executionMode: 'single',
+				query: 'INSERT INTO t VALUES (?)',
+				parameters: [{ value: 1 }],
+			});
+			await node.execute.call(ctx);
+
+			const queryReadsForItem0 = (ctx.getNodeParameter as jest.Mock).mock.calls.filter(
+				([name, itemIndex]) => name === 'query' && itemIndex === 0,
+			);
+			const paramReadsForItem0 = (ctx.getNodeParameter as jest.Mock).mock.calls.filter(
+				([name, itemIndex]) => name === 'parameters' && itemIndex === 0,
+			);
+			expect(queryReadsForItem0).toHaveLength(1);
+			expect(paramReadsForItem0).toHaveLength(1);
+		});
+
+		it('throws NodeOperationError with the real itemIndex when a query is empty (no batch attempted)', async () => {
+			const ctx = makeContext({
+				items: [{ json: {} }, { json: {} }],
+				executionMode: 'single',
+				query: ['SELECT 1', ''],
+			});
+			const thrown = await node.execute.call(ctx).catch((e) => e);
+
+			expect(thrown).toBeInstanceOf(NodeOperationError);
+			expect((thrown as NodeOperationError).context?.itemIndex).toBe(1);
+			expect(mockDriver.executeBatch).not.toHaveBeenCalled();
+		});
+
+		it('stores one error item per input item (same message) for an empty query when continueOnFail is true', async () => {
+			// The empty query is only found on item 1, but since the batch was never
+			// sent, there's no way to know item 0 would have succeeded — every item is
+			// reported as failed so the output item count still matches the input.
+			const ctx = makeContext({
+				items: [{ json: {} }, { json: {} }],
+				executionMode: 'single',
+				query: ['SELECT 1', ''],
+				continueOnFail: true,
+			});
+			const [result] = await node.execute.call(ctx);
+
+			expect(result).toHaveLength(2);
+			expect(result[0].json).toMatchObject({ error: expect.stringContaining('empty') });
+			expect(result[1].json).toEqual(result[0].json);
+			expect(result[0].pairedItem).toEqual({ item: 0 });
+			expect(result[1].pairedItem).toEqual({ item: 1 });
+		});
+
+		it('throws NodeOperationError attributed to item 0 when the batch reports status: error', async () => {
+			// The batch protocol gives no way to tell which statement failed, so the
+			// failure is reported against item 0 rather than the real culprit — the same
+			// trade-off MySQL's "Single" query-batching mode makes.
+			mockDriver.executeBatch.mockResolvedValue({
+				status: 'error',
+				exception: { sqlCode: 'E-1', text: 'syntax error' },
+			});
+
+			const ctx = makeContext({
+				items: [{ json: {} }, { json: {} }],
+				executionMode: 'single',
+				query: ['INSERT INTO t VALUES (1)', 'BAD SQL'],
+			});
+			const thrown = await node.execute.call(ctx).catch((e) => e);
+
+			expect(thrown).toBeInstanceOf(NodeOperationError);
+			expect((thrown as NodeOperationError).message).toContain('syntax error');
+			expect((thrown as NodeOperationError).context?.itemIndex).toBe(0);
+			expect(mockDriver.query).not.toHaveBeenCalled();
+		});
+
+		it('returns one error item per input item (same message) when the batch fails and continueOnFail is true', async () => {
+			mockDriver.executeBatch.mockResolvedValue({
+				status: 'error',
+				exception: { sqlCode: 'E-1', text: 'bad statement' },
+			});
+
+			const ctx = makeContext({
+				items: [{ json: {} }, { json: {} }],
+				executionMode: 'single',
+				query: ['INSERT INTO t VALUES (1)', 'BAD SQL'],
+				continueOnFail: true,
+			});
+			const [result] = await node.execute.call(ctx);
+
+			expect(result).toEqual([
+				{ json: { error: 'bad statement' }, pairedItem: { item: 0 } },
+				{ json: { error: 'bad statement' }, pairedItem: { item: 1 } },
+			]);
+		});
+
+		it('uses a fallback message when the batch error has no exception details', async () => {
+			mockDriver.executeBatch.mockResolvedValue({ status: 'error', exception: undefined });
+
+			const ctx = makeContext({ executionMode: 'single', continueOnFail: true });
+			const [[item]] = await node.execute.call(ctx);
+
+			expect(item.json).toEqual({ error: 'Batch execution failed' });
+		});
+
+		it('treats a batch response with no responseData as affectedRows: 0 for a single item (no ambiguity)', async () => {
+			// With exactly one item there's nothing to mis-map: whatever came back
+			// (nothing, here) unambiguously belongs to that one item.
+			mockDriver.executeBatch.mockResolvedValue({ status: 'ok' });
+
+			const ctx = makeContext({ executionMode: 'single' });
+			const [[item]] = await node.execute.call(ctx);
+
+			expect(item.json).toEqual({ affectedRows: 0 });
+		});
+
+		it('throws NodeOperationError when the batch returns fewer results than items', async () => {
+			// Defensive guard for a hypothetical driver response, not a confirmed Exasol
+			// behavior: with 3 items but only 2 results, results can no longer be safely
+			// mapped back to items by position, so this must fail loudly rather than
+			// silently attribute a result to the wrong item.
+			mockDriver.executeBatch.mockResolvedValue({
+				status: 'ok',
+				responseData: {
+					numResults: 2,
+					results: [
+						{ resultType: 'rowCount', rowCount: 1 },
+						{ resultType: 'rowCount', rowCount: 1 },
+					],
+				},
+			});
+
+			const ctx = makeContext({
+				items: [{ json: {} }, { json: {} }, { json: {} }],
+				executionMode: 'single',
+				query: ['INSERT INTO t VALUES (0)', 'INSERT INTO t VALUES (1)', 'INSERT INTO t VALUES (2)'],
+			});
+			const thrown = await node.execute.call(ctx).catch((e) => e);
+
+			expect(thrown).toBeInstanceOf(NodeOperationError);
+			expect((thrown as NodeOperationError).message).toContain('one result per item');
+		});
+
+		it('returns one error item per input item when the batch result count mismatches and continueOnFail is true', async () => {
+			mockDriver.executeBatch.mockResolvedValue({
+				status: 'ok',
+				responseData: { numResults: 1, results: [{ resultType: 'rowCount', rowCount: 1 }] },
+			});
+
+			const ctx = makeContext({
+				items: [{ json: {} }, { json: {} }],
+				executionMode: 'single',
+				continueOnFail: true,
+			});
+			const [result] = await node.execute.call(ctx);
+
+			expect(result).toHaveLength(2);
+			expect(result[0].json).toMatchObject({ error: expect.stringContaining('one result per item') });
+			expect(result[1].json).toEqual(result[0].json);
+		});
+
+		it('throws NodeOperationError attributed to item 0 when executeBatch itself rejects', async () => {
+			mockDriver.executeBatch.mockRejectedValue(new Error('connection reset'));
+
+			const ctx = makeContext({ executionMode: 'single', query: 'INSERT INTO t VALUES (1)' });
+			const thrown = await node.execute.call(ctx).catch((e) => e);
+
+			expect(thrown).toBeInstanceOf(NodeOperationError);
+			expect((thrown as NodeOperationError).message).toContain('connection reset');
+			expect((thrown as NodeOperationError).context?.itemIndex).toBe(0);
 		});
 	});
 });
