@@ -158,6 +158,8 @@ export class Exasol implements INodeType {
 				// getCurrentNodeParameter (unlike getNodeParameter) reads the value currently set
 				// in the editor UI for this node, with no item index — loadOptions runs once per
 				// dropdown open, not once per input item.
+				// The cleanup code can be simplified once the automatic resource cleanup is
+				// implemented  in the driver, see https://github.com/exasol/exasol-driver-ts/issues/73.
 				const schema = this.getCurrentNodeParameter('schema') as string | undefined;
 				if (!schema) return [];
 

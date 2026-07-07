@@ -493,7 +493,9 @@ describe('Select Rows operation', () => {
 		const ctx = makeContext({ continueOnFail: true });
 		const [[item]] = await node.execute.call(ctx);
 
-		expect(item.json).toEqual({ error: 'Select query failed' });
+		expect(item.json).toEqual({
+			error: 'Select query failed (query: SELECT * FROM "MY_SCHEMA"."MY_TABLE")',
+		});
 	});
 
 	it('stores the error in json when continueOnFail is true', async () => {
@@ -502,7 +504,23 @@ describe('Select Rows operation', () => {
 		const ctx = makeContext({ continueOnFail: true });
 		const [[item]] = await node.execute.call(ctx);
 
-		expect(item.json).toEqual({ error: 'bad query' });
+		expect(item.json).toEqual({
+			error: 'bad query (query: SELECT * FROM "MY_SCHEMA"."MY_TABLE")',
+		});
+	});
+
+	// The query text is only known once buildSelectQuery() has run, so it must be appended by an
+	// inner try/catch around runSelect() specifically — not the outer per-item catch, which also
+	// handles validation errors (e.g. empty Schema) that occur before any query exists.
+	it('includes the executed SQL query in the error message', async () => {
+		mockDriver.query.mockRejectedValue(new Error('connection reset'));
+
+		const ctx = makeContext({ schema: 'S', table: 'T', continueOnFail: true });
+		const [[item]] = await node.execute.call(ctx);
+
+		expect(item.json).toEqual({
+			error: 'connection reset (query: SELECT * FROM "S"."T")',
+		});
 	});
 
 	it('sets pairedItem on error output when continueOnFail is true', async () => {
@@ -604,7 +622,9 @@ describe('Select Rows operation', () => {
 		});
 		const [result] = await node.execute.call(ctx);
 
-		expect(result[0].json).toEqual({ error: 'first fails' });
+		expect(result[0].json).toEqual({
+			error: 'first fails (query: SELECT * FROM "MY_SCHEMA"."MY_TABLE")',
+		});
 		expect(result[1].json).toEqual({ ID: 2 });
 	});
 });

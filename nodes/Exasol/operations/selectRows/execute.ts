@@ -77,10 +77,16 @@ function requirePositiveInteger(
 // not a bindable value (no `?` placeholder exists for it) — so, like combinator/operator in
 // whereBuilder.ts, it's validated against an explicit allow-list instead of trusted via the
 // 'ASC' | 'DESC' type an n8n expression can bypass at runtime.
-function requireSortDirection(direction: unknown): 'ASC' | 'DESC' {
+function requireSortDirection(
+	context: IExecuteFunctions,
+	direction: unknown,
+	itemIndex: number,
+): 'ASC' | 'DESC' {
 	if (direction !== 'ASC' && direction !== 'DESC') {
-		throw new Error(
+		throw new NodeOperationError(
+			context.getNode(),
 			`Invalid Sort direction: ${JSON.stringify(direction)}. Expected "ASC" or "DESC".`,
+			{ itemIndex },
 		);
 	}
 	return direction;
@@ -90,9 +96,11 @@ function requireSortDirection(direction: unknown): 'ASC' | 'DESC' {
 // from saving an empty default; an expression can still resolve it to '' at runtime. Without
 // this guard an empty column would reach quoteIdentifier() unchecked, producing `ORDER BY ""`
 // and an opaque Exasol syntax error instead of a clear validation message.
-function requireSortColumn(column: string): string {
+function requireSortColumn(context: IExecuteFunctions, column: string, itemIndex: number): string {
 	if (!column?.trim()) {
-		throw new Error('Sort column must not be empty.');
+		throw new NodeOperationError(context.getNode(), 'Sort column must not be empty.', {
+			itemIndex,
+		});
 	}
 	return column;
 }
@@ -101,11 +109,13 @@ function requireSortColumn(column: string): string {
 // sort-rule columns are identifiers (quoted, never bound); WHERE values are bound via `?`
 // and returned separately in whereResult.params for stmt.execute().
 function buildSelectQuery(
+	context: IExecuteFunctions,
 	schema: string,
 	table: string,
 	whereClause: string,
 	sortRules: Array<{ column: string; direction: unknown }>,
 	limit: number | undefined,
+	itemIndex: number,
 ): string {
 	let query = `SELECT * FROM ${quoteIdentifier(schema)}.${quoteIdentifier(table)}`;
 	if (whereClause) {
@@ -115,7 +125,7 @@ function buildSelectQuery(
 		const orderBy = sortRules
 			.map(
 				(rule) =>
-					`${quoteIdentifier(requireSortColumn(rule.column))} ${requireSortDirection(rule.direction)}`,
+					`${quoteIdentifier(requireSortColumn(context, rule.column, itemIndex))} ${requireSortDirection(context, rule.direction, itemIndex)}`,
 			)
 			.join(', ');
 		query += ` ORDER BY ${orderBy}`;
@@ -209,9 +219,20 @@ export async function execute(
 				? undefined
 				: requirePositiveInteger(this, this.getNodeParameter('limit', i, 50), 'Limit', i);
 
-			const query = buildSelectQuery(schema, table, where.clause, sortRules, limit);
+			const query = buildSelectQuery(this, schema, table, where.clause, sortRules, limit, i);
 
-			returnData.push(...(await runSelect(driver, query, where.params, i)));
+			try {
+				returnData.push(...(await runSelect(driver, query, where.params, i)));
+			} catch (error) {
+				// Neither the driver (@exasol/exasol-driver-ts) nor mapSelectResult() include the
+				// SQL text in their error messages, so it's appended here — otherwise a failure
+				// like "table not found" gives no clue which of the per-item queries caused it.
+				throw new NodeOperationError(
+					this.getNode(),
+					`${(error as Error).message} (query: ${query})`,
+					{ itemIndex: i },
+				);
+			}
 		} catch (error) {
 			if (this.continueOnFail()) {
 				returnData.push({

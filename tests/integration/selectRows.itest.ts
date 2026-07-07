@@ -175,6 +175,12 @@ describe('Select Rows operation', () => {
 			params: { schema: fixture.schema, table: 'NO_SUCH_TABLE' },
 		});
 
-		await expect(new Exasol().execute.call(ctx)).rejects.toBeInstanceOf(NodeOperationError);
+		const thrown = await new Exasol().execute.call(ctx).catch((e) => e);
+
+		expect(thrown).toBeInstanceOf(NodeOperationError);
+		expect((thrown as NodeOperationError).message).toContain('NO_SUCH_TABLE not found');
+		expect((thrown as NodeOperationError).message).toContain(
+			`(query: SELECT * FROM "${fixture.schema}"."NO_SUCH_TABLE")`,
+		);
 	});
 });
