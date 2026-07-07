@@ -99,6 +99,7 @@ describe('execute()', () => {
 	function makeContext(
 		opts: {
 			items?: INodeExecutionData[];
+			operation?: string;
 			query?: string | string[];
 			parameters?: Array<{ value: unknown }>;
 			executionMode?: string;
@@ -120,7 +121,7 @@ describe('execute()', () => {
 			getNodeParameter: jest
 				.fn()
 				.mockImplementation((name: string, itemIndex?: number, fallback?: unknown) => {
-					if (name === 'operation') return 'executeQuery';
+					if (name === 'operation') return opts.operation ?? 'executeQuery';
 					if (name === 'executionMode') return opts.executionMode ?? fallback ?? 'sequentially';
 					if (name === 'parameters') {
 						return !opts.parameters ? (fallback ?? {}) : { values: opts.parameters };
@@ -284,9 +285,9 @@ describe('execute()', () => {
 	it('throws NodeOperationError when continueOnFail is false', async () => {
 		mockDriver.query.mockRejectedValue(new Error('bad sql'));
 
-		await expect(
-			node.execute.call(makeContext({ continueOnFail: false })),
-		).rejects.toBeInstanceOf(NodeOperationError);
+		await expect(node.execute.call(makeContext({ continueOnFail: false }))).rejects.toBeInstanceOf(
+			NodeOperationError,
+		);
 	});
 
 	it('returns error item when driver.connect() fails and continueOnFail is true', async () => {
@@ -554,6 +555,15 @@ describe('execute()', () => {
 		});
 
 		await expect(node.execute.call(ctx)).rejects.toBeInstanceOf(NodeOperationError);
+	});
+
+	// ── Operation dispatch ───────────────────────────────────────────────────────
+
+	it('throws NodeOperationError for an unrecognized operation value', async () => {
+		const ctx = makeContext({ operation: 'notARealOperation' });
+
+		await expect(node.execute.call(ctx)).rejects.toBeInstanceOf(NodeOperationError);
+		expect(mockDriver.close).toHaveBeenCalledTimes(1);
 	});
 
 	// ── Execution modes ──────────────────────────────────────────────────────────
@@ -917,7 +927,9 @@ describe('execute()', () => {
 			const [result] = await node.execute.call(ctx);
 
 			expect(result).toHaveLength(2);
-			expect(result[0].json).toMatchObject({ error: expect.stringContaining('one result per item') });
+			expect(result[0].json).toMatchObject({
+				error: expect.stringContaining('one result per item'),
+			});
 			expect(result[1].json).toEqual(result[0].json);
 		});
 

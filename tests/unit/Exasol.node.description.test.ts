@@ -15,22 +15,33 @@ describe('Exasol node description', () => {
 
 	it('requires exasolApi credentials', () => {
 		expect(node.description.credentials).toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({ name: 'exasolApi', required: true }),
-			]),
+			expect.arrayContaining([expect.objectContaining({ name: 'exasolApi', required: true })]),
 		);
 	});
 
-	it('has an operation dropdown listing executeQuery', () => {
+	it('has an operation dropdown listing executeQuery and selectRows', () => {
 		const operationProp = node.description.properties.find((p) => p.name === 'operation');
 		expect(operationProp).toBeDefined();
 		expect(operationProp?.type).toBe('options');
 		const values = (operationProp?.options as INodePropertyOptions[]).map((o) => o.value);
 		expect(values).toContain('executeQuery');
+		expect(values).toContain('selectRows');
 	});
 
 	it('exposes a SQL query parameter', () => {
 		const names = node.description.properties.map((p) => p.name);
 		expect(names).toContain('query');
+	});
+
+	it('exposes schema, table, where, and sort parameters for Select Rows', () => {
+		const names = node.description.properties.map((p) => p.name);
+		expect(names).toEqual(
+			expect.arrayContaining(['schema', 'table', 'returnAll', 'limit', 'where', 'sort']),
+		);
+	});
+
+	it('registers listSchemas and listTables loadOptions methods', () => {
+		expect(node.methods?.loadOptions).toHaveProperty('listSchemas');
+		expect(node.methods?.loadOptions).toHaveProperty('listTables');
 	});
 });
