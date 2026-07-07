@@ -1,5 +1,7 @@
 import type { INodeProperties } from 'n8n-workflow';
 
+import { schemaAndTableFields } from '../shared/schemaTableFields';
+
 // Shared by every property below — visible only when the Operation dropdown is "Insert".
 const displayOptions = {
 	show: {
@@ -15,35 +17,7 @@ const displayOptions = {
  * column/value pairs configured on the node (Map Each Column Below).
  */
 export const description: INodeProperties[] = [
-	{
-		displayName: 'Schema Name or ID',
-		name: 'schema',
-		type: 'options',
-		typeOptions: {
-			loadOptionsMethod: 'listSchemas',
-		},
-		default: '',
-		required: true,
-		description:
-			'Schema containing the table to insert into. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
-		displayOptions,
-	},
-	{
-		displayName: 'Table Name or ID',
-		name: 'table',
-		type: 'options',
-		typeOptions: {
-			loadOptionsMethod: 'listTables',
-			// loadOptionsDependsOn re-runs listTables (and clears the current selection)
-			// whenever the Schema field changes, since the table list is schema-scoped.
-			loadOptionsDependsOn: ['schema'],
-		},
-		default: '',
-		required: true,
-		description:
-			'Table to insert rows into. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
-		displayOptions,
-	},
+	...schemaAndTableFields(displayOptions, 'insert into', 'insert rows into'),
 	{
 		// noDataExpression: true, like the "Operation" dropdown itself — this field decides which
 		// other fields (Columns) are shown, so it must be a fixed choice, not data-driven.

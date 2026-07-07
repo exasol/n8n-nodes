@@ -1,5 +1,7 @@
 import type { INodeProperties } from 'n8n-workflow';
 
+import { schemaAndTableFields } from '../shared/schemaTableFields';
+
 // Shared by every property below — visible only when the Operation dropdown is "Select Rows".
 const displayOptions = {
 	show: {
@@ -14,38 +16,7 @@ const displayOptions = {
  * schema/table picker, optional WHERE conditions, optional sort rules, and a row limit.
  */
 export const description: INodeProperties[] = [
-	{
-		// type: 'options' with typeOptions.loadOptionsMethod renders a dropdown whose choices
-		// are fetched at edit time by calling the named method under methods.loadOptions on
-		// the node class (see Exasol.node.ts) — here, a live "list schemas" query.
-		displayName: 'Schema Name or ID',
-		name: 'schema',
-		type: 'options',
-		typeOptions: {
-			loadOptionsMethod: 'listSchemas',
-		},
-		default: '',
-		required: true,
-		description:
-			'Schema containing the table to select from. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
-		displayOptions,
-	},
-	{
-		displayName: 'Table Name or ID',
-		name: 'table',
-		type: 'options',
-		typeOptions: {
-			loadOptionsMethod: 'listTables',
-			// loadOptionsDependsOn re-runs listTables (and clears the current selection)
-			// whenever the Schema field changes, since the table list is schema-scoped.
-			loadOptionsDependsOn: ['schema'],
-		},
-		default: '',
-		required: true,
-		description:
-			'Table to select rows from. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
-		displayOptions,
-	},
+	...schemaAndTableFields(displayOptions, 'select from', 'select rows from'),
 	{
 		displayName: 'Return All',
 		name: 'returnAll',
