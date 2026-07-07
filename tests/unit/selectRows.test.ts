@@ -241,6 +241,33 @@ describe('Select Rows operation', () => {
 		expect((thrown as NodeOperationError).message).toContain('Limit must be a positive integer');
 	});
 
+	// Expressions over upstream JSON/webhook data commonly produce stringified numbers (e.g.
+	// "10" instead of 10) — these should be coerced and accepted, not rejected outright.
+	it('accepts a numeric-string Limit produced by an expression', async () => {
+		await node.execute.call(makeContext({ returnAll: false, limit: '10' }));
+
+		expect(mockDriver.query).toHaveBeenCalledWith(
+			'SELECT * FROM "MY_SCHEMA"."MY_TABLE" LIMIT 10',
+			undefined,
+			undefined,
+			'raw',
+		);
+	});
+
+	it.each(['0', '-1', '1.5'])(
+		'rejects a numeric-string Limit of %p as not a positive integer',
+		async (limit) => {
+			const ctx = makeContext({ returnAll: false, limit });
+
+			const thrown = await node.execute.call(ctx).catch((e) => e);
+
+			expect(thrown).toBeInstanceOf(NodeOperationError);
+			expect((thrown as NodeOperationError).message).toContain(
+				'Limit must be a positive integer',
+			);
+		},
+	);
+
 	// ── WHERE conditions — parameterized path (prepare + stmt.execute) ─────────────
 
 	it('builds a parameterized WHERE clause and binds its values via prepare()', async () => {
@@ -391,6 +418,21 @@ describe('Select Rows operation', () => {
 		expect(mockDriver.query).not.toHaveBeenCalled();
 	});
 
+	// Sort "Column" is required in the UI, which only stops an empty default from being saved —
+	// an n8n expression can still resolve it to '' at runtime and must be rejected before it
+	// reaches quoteIdentifier() unchecked.
+	it('throws NodeOperationError instead of interpolating an empty Sort column', async () => {
+		const ctx = makeContext({
+			sort: { rules: [{ column: '', direction: 'ASC' }] },
+		});
+
+		const thrown = await node.execute.call(ctx).catch((e) => e);
+
+		expect(thrown).toBeInstanceOf(NodeOperationError);
+		expect((thrown as NodeOperationError).message).toContain('Sort column must not be empty');
+		expect(mockDriver.query).not.toHaveBeenCalled();
+	});
+
 	it('combines WHERE, ORDER BY, and LIMIT in the correct clause order', async () => {
 		await node.execute.call(
 			makeContext({
@@ -517,6 +559,30 @@ describe('Select Rows operation', () => {
 
 		expect(thrown).toBeInstanceOf(NodeOperationError);
 		expect((thrown as NodeOperationError).message).toContain('Table must not be empty');
+	});
+
+	it('throws NodeOperationError for a whitespace-only Schema', async () => {
+		const ctx = makeContext({ schema: '   ' });
+
+		const thrown = await node.execute.call(ctx).catch((e) => e);
+
+		expect(thrown).toBeInstanceOf(NodeOperationError);
+		expect((thrown as NodeOperationError).message).toContain('Schema must not be empty');
+	});
+
+	// A leading/trailing-whitespace Schema or Table must not be quoted verbatim as a SQL
+	// identifier — Exasol would treat " MY_SCHEMA" as a literal name containing a space, which
+	// never matches the real schema and fails with a confusing not-found error instead of the
+	// clear validation message this trims down to.
+	it('trims surrounding whitespace from Schema and Table before quoting them', async () => {
+		await node.execute.call(makeContext({ schema: '  MY_SCHEMA  ', table: '  MY_TABLE  ' }));
+
+		expect(mockDriver.query).toHaveBeenCalledWith(
+			'SELECT * FROM "MY_SCHEMA"."MY_TABLE"',
+			undefined,
+			undefined,
+			'raw',
+		);
 	});
 
 	it('stores an empty-Schema error in json when continueOnFail is true', async () => {

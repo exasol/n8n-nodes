@@ -122,6 +122,15 @@ describe('Exasol node loadOptions', () => {
 			);
 			expect(mockDriver.close).toHaveBeenCalledTimes(1);
 		});
+
+		it('closes the driver connection even when connect() itself fails', async () => {
+			mockDriver.connect.mockRejectedValue(new Error('auth failed'));
+
+			await expect(node.methods.loadOptions.listSchemas.call(makeContext())).rejects.toThrow(
+				'auth failed',
+			);
+			expect(mockDriver.close).toHaveBeenCalledTimes(1);
+		});
 	});
 
 	describe('listTables', () => {
@@ -176,6 +185,15 @@ describe('Exasol node loadOptions', () => {
 			await node.methods.loadOptions.listTables.call(makeContext({ schema: 'MY_SCHEMA' }));
 
 			expect(mockStatement.close).toHaveBeenCalledTimes(1);
+			expect(mockDriver.close).toHaveBeenCalledTimes(1);
+		});
+
+		it('closes the driver connection even when connect() itself fails', async () => {
+			mockDriver.connect.mockRejectedValue(new Error('auth failed'));
+
+			await expect(
+				node.methods.loadOptions.listTables.call(makeContext({ schema: 'MY_SCHEMA' })),
+			).rejects.toThrow('auth failed');
 			expect(mockDriver.close).toHaveBeenCalledTimes(1);
 		});
 	});

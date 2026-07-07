@@ -56,6 +56,56 @@ describe('Select Rows operation', () => {
 		expect(result.map((item) => item.json.COUNTRY)).toEqual(['France', 'France']);
 	});
 
+	it('filters rows with a WHERE NOT LIKE condition', async () => {
+		const ctx = buildExecuteFunctions({
+			container: fixture.container,
+			operation: 'selectRows',
+			params: {
+				schema: fixture.schema,
+				table: 'SKI_RESORT',
+				where: { conditions: [{ column: 'COUNTRY', operator: 'notLike', value: 'Fra%' }] },
+			},
+		});
+		const [result] = await new Exasol().execute.call(ctx);
+
+		expect(result).toHaveLength(1);
+		expect(result[0].json.COUNTRY).toBe('Austria');
+	});
+
+	it('filters rows with a WHERE REGEXP LIKE condition', async () => {
+		const ctx = buildExecuteFunctions({
+			container: fixture.container,
+			operation: 'selectRows',
+			params: {
+				schema: fixture.schema,
+				table: 'SKI_RESORT',
+				where: { conditions: [{ column: 'COUNTRY', operator: 'regexpLike', value: '^Fra.*' }] },
+			},
+		});
+		const [result] = await new Exasol().execute.call(ctx);
+
+		expect(result).toHaveLength(2);
+		expect(result.map((item) => item.json.COUNTRY)).toEqual(['France', 'France']);
+	});
+
+	it('filters rows with a WHERE NOT REGEXP LIKE condition', async () => {
+		const ctx = buildExecuteFunctions({
+			container: fixture.container,
+			operation: 'selectRows',
+			params: {
+				schema: fixture.schema,
+				table: 'SKI_RESORT',
+				where: {
+					conditions: [{ column: 'COUNTRY', operator: 'notRegexpLike', value: '^Fra.*' }],
+				},
+			},
+		});
+		const [result] = await new Exasol().execute.call(ctx);
+
+		expect(result).toHaveLength(1);
+		expect(result[0].json.COUNTRY).toBe('Austria');
+	});
+
 	it('filters rows with an IS NULL condition', async () => {
 		const ctx = buildExecuteFunctions({
 			container: fixture.container,

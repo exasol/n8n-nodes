@@ -42,6 +42,9 @@ describe('buildWhereClause()', () => {
 		['greaterThan', '>'],
 		['greaterThanOrEqual', '>='],
 		['like', 'LIKE'],
+		['notLike', 'NOT LIKE'],
+		['regexpLike', 'REGEXP_LIKE'],
+		['notRegexpLike', 'NOT REGEXP_LIKE'],
 	] as const)('maps operator %s to SQL "%s"', (operator, sql) => {
 		const result = buildWhereClause([{ column: 'NAME', operator, value: 'x' }]);
 
@@ -146,5 +149,17 @@ describe('buildWhereClause()', () => {
 		const conditions = [{ column: 'A', operator: '__proto__' }] as unknown as WhereCondition[];
 
 		expect(() => buildWhereClause(conditions)).toThrow(/Invalid Where operator/);
+	});
+
+	it('rejects an empty Where column', () => {
+		const conditions: WhereCondition[] = [{ column: '', operator: 'equals', value: 1 }];
+
+		expect(() => buildWhereClause(conditions)).toThrow(/Where column must not be empty/);
+	});
+
+	it('rejects a whitespace-only Where column', () => {
+		const conditions: WhereCondition[] = [{ column: '   ', operator: 'equals', value: 1 }];
+
+		expect(() => buildWhereClause(conditions)).toThrow(/Where column must not be empty/);
 	});
 });

@@ -11,6 +11,9 @@ export type WhereOperator =
 	| 'greaterThan'
 	| 'greaterThanOrEqual'
 	| 'like'
+	| 'notLike'
+	| 'regexpLike'
+	| 'notRegexpLike'
 	| 'isNull'
 	| 'isNotNull';
 
@@ -39,6 +42,12 @@ const OPERATOR_SQL: Record<WhereOperator, string> = {
 	greaterThan: '>',
 	greaterThanOrEqual: '>=',
 	like: 'LIKE',
+	notLike: 'NOT LIKE',
+	// Exasol's regex predicate is infix, like LIKE, rather than a function call: it reads
+	// "<string> REGEXP_LIKE <pattern>" (or "<string> NOT REGEXP_LIKE <pattern>"), so it slots
+	// into the same "column OP ?" template as the other binary operators below.
+	regexpLike: 'REGEXP_LIKE',
+	notRegexpLike: 'NOT REGEXP_LIKE',
 	isNull: 'IS NULL',
 	isNotNull: 'IS NOT NULL',
 };
@@ -98,6 +107,13 @@ export function buildWhereClause(
 	const fragments = conditions.map((condition) => {
 		if (!KNOWN_OPERATORS.has(condition.operator)) {
 			throw new Error(`Invalid Where operator: ${JSON.stringify(condition.operator)}.`);
+		}
+		// "Column" is required in the UI, which only stops an empty default from being saved —
+		// an n8n expression can still resolve it to '' at runtime. Without this guard an empty
+		// column would reach quoteIdentifier() unchecked, producing `WHERE "" = ?` and an opaque
+		// Exasol syntax error instead of a clear validation message.
+		if (!condition.column || !condition.column.trim()) {
+			throw new Error('Where column must not be empty.');
 		}
 		const column = quoteIdentifier(condition.column);
 		const operatorSql = OPERATOR_SQL[condition.operator];

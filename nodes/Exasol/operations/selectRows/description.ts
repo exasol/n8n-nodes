@@ -132,6 +132,17 @@ export const description: INodeProperties[] = [
 							{ name: 'Less Than or Equal', value: 'lessThanOrEqual', description: '≤' },
 							{ name: 'Like', value: 'like' },
 							{ name: 'Not Equals', value: 'notEquals', description: '≠' },
+							{ name: 'Not Like', value: 'notLike' },
+							{
+								name: 'Not Regexp Like',
+								value: 'notRegexpLike',
+								description: 'String does not match a regular expression',
+							},
+							{
+								name: 'Regexp Like',
+								value: 'regexpLike',
+								description: 'String matches a regular expression',
+							},
 						],
 						default: 'equals',
 						description: 'Comparison used between the column and Value',

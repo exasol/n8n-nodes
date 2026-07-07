@@ -30,40 +30,47 @@ function readSortRules(
 }
 
 // Schema and Table are marked required in description.ts, which only stops the UI from saving
-// an empty default — an n8n expression can still resolve to '' at runtime, so this is validated
-// again here (same pattern as executeQuery's readQuery()).
+// an empty default — an n8n expression can still resolve to '' (or whitespace) at runtime, so
+// this is validated again here (same pattern as executeQuery's readQuery()). The trimmed value
+// is what gets returned, since the untrimmed original would otherwise be quoted verbatim as a
+// SQL identifier further down and silently fail to match the real schema/table name.
 function requireNonEmpty(
 	context: IExecuteFunctions,
 	value: string,
 	fieldLabel: string,
 	itemIndex: number,
 ): string {
-	if (!value.trim()) {
+	const trimmed = value.trim();
+	if (!trimmed) {
 		throw new NodeOperationError(context.getNode(), `${fieldLabel} must not be empty`, {
 			itemIndex,
 		});
 	}
-	return value;
+	return trimmed;
 }
 
 // Limit is concatenated straight into the query text (Exasol's LIMIT doesn't take a bound `?`
 // value the same way a WHERE value does), so — like requireSortDirection below — it is
 // allow-list-validated here rather than trusted via a `getNodeParameter(...) as number` cast,
-// which an n8n expression could bypass at runtime with a non-numeric value.
+// which an n8n expression could bypass at runtime with a non-numeric value. Numeric strings
+// (e.g. "10") are coerced rather than rejected — expressions over upstream JSON data commonly
+// produce stringified numbers, and rejecting them would force users to add a manual Number()
+// conversion for an otherwise valid limit.
 function requirePositiveInteger(
 	context: IExecuteFunctions,
 	value: unknown,
 	fieldLabel: string,
 	itemIndex: number,
 ): number {
-	if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
+	const numericValue = typeof value === 'string' ? Number(value) : value;
+	if (typeof numericValue !== 'number' || !Number.isInteger(numericValue) || numericValue <= 0) {
 		throw new NodeOperationError(
 			context.getNode(),
 			`${fieldLabel} must be a positive integer, got: ${JSON.stringify(value)}`,
 			{ itemIndex },
 		);
 	}
-	return value;
+	return numericValue;
 }
 
 // ORDER BY direction is a raw SQL keyword, not an identifier (quoteIdentifier doesn't apply) and
@@ -77,6 +84,17 @@ function requireSortDirection(direction: unknown): 'ASC' | 'DESC' {
 		);
 	}
 	return direction;
+}
+
+// Sort "Column" is required in description.ts, which — like Schema/Table — only stops the UI
+// from saving an empty default; an expression can still resolve it to '' at runtime. Without
+// this guard an empty column would reach quoteIdentifier() unchecked, producing `ORDER BY ""`
+// and an opaque Exasol syntax error instead of a clear validation message.
+function requireSortColumn(column: string): string {
+	if (!column || !column.trim()) {
+		throw new Error('Sort column must not be empty.');
+	}
+	return column;
 }
 
 // Assembles the final SELECT statement from its already-parsed pieces. Schema, table, and
@@ -95,7 +113,10 @@ function buildSelectQuery(
 	}
 	if (sortRules.length > 0) {
 		const orderBy = sortRules
-			.map((rule) => `${quoteIdentifier(rule.column)} ${requireSortDirection(rule.direction)}`)
+			.map(
+				(rule) =>
+					`${quoteIdentifier(requireSortColumn(rule.column))} ${requireSortDirection(rule.direction)}`,
+			)
 			.join(', ');
 		query += ` ORDER BY ${orderBy}`;
 	}

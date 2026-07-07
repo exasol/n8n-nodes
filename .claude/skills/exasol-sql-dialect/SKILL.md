@@ -58,7 +58,11 @@ SELECT * FROM my_table ORDER BY id LIMIT 20 OFFSET 10;
 ## Regular Expressions
 
 ```sql
--- Boolean match (REGEXP_LIKE is not supported; use REGEXP_INSTR or REGEXP_COUNT instead)
+-- Boolean match: REGEXP_LIKE is an infix predicate, not a function — "expr [NOT] REGEXP_LIKE pattern"
+WHERE column REGEXP_LIKE '^[A-Z]+$'
+WHERE column NOT REGEXP_LIKE '^[A-Z]+$'
+
+-- Equivalent boolean match via REGEXP_INSTR
 WHERE REGEXP_INSTR(column, '^[A-Z]+$') > 0
 
 -- Count matches

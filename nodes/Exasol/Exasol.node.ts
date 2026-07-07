@@ -21,6 +21,7 @@ import {
 	selectRowsDescription,
 	selectRows,
 } from './operations';
+import { resultSetToRows } from './operations/shared/resultMapper';
 
 // Shape of the ExasolApi credential fields (mirrors ExasolApi.credentials.ts properties).
 interface ExasolCredentials {
@@ -57,13 +58,15 @@ function buildDriver(creds: ExasolCredentials): ExasolDriver {
 
 // Pulls the values of a single-column result set out of the raw SQLResponse shape returned by
 // stmt.execute() (used by listTables, whose WHERE ? binding rules out the friendlier
-// driver.query()-only QueryResult/getRows() helper). The Exasol wire format is column-major —
-// data[0] holds every row's value for the first (and here, only) selected column.
+// driver.query()-only QueryResult/getRows() helper). Reuses resultSetToRows' column-major-to-
+// row-major pivot (shared with Execute Query and Select Rows) instead of re-decoding the wire
+// format here, then reads out the one selected column.
 function firstColumnValues(response: SQLResponse<SQLQueriesResponse>): string[] {
 	const result = response.responseData?.results?.[0];
-	if (result?.resultType !== 'resultSet' || !result.resultSet?.data) return [];
-	const { data, numRows } = result.resultSet;
-	return Array.from({ length: numRows }, (_, i) => data[0]?.[i] as string);
+	if (result?.resultType !== 'resultSet' || !result.resultSet) return [];
+	const columnName = result.resultSet.columns[0]?.name;
+	if (!columnName) return [];
+	return resultSetToRows(result.resultSet).map((row) => row[columnName] as string);
 }
 
 /**
@@ -137,8 +140,8 @@ export class Exasol implements INodeType {
 			async listSchemas(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
 				const credentials = await this.getCredentials('exasolApi');
 				const driver = buildDriver(credentials as unknown as ExasolCredentials);
-				await driver.connect();
 				try {
+					await driver.connect();
 					const result = await driver.query(
 						'SELECT SCHEMA_NAME FROM EXA_ALL_SCHEMAS ORDER BY SCHEMA_NAME',
 					);
@@ -160,8 +163,8 @@ export class Exasol implements INodeType {
 
 				const credentials = await this.getCredentials('exasolApi');
 				const driver = buildDriver(credentials as unknown as ExasolCredentials);
-				await driver.connect();
 				try {
+					await driver.connect();
 					const stmt = await driver.prepare(
 						'SELECT TABLE_NAME FROM EXA_ALL_TABLES WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME',
 					);
