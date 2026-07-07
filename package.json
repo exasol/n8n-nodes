@@ -47,7 +47,7 @@
 		"@n8n/node-cli": "*",
 		"@types/jest": "^30.0.0",
 		"@types/ws": "^8.18.1",
-		"eslint": "9.39.4",
+		"eslint": "10.6.0",
 		"jest": "^30.0.0",
 		"n8n-workflow": ">=2.0.0",
 		"prettier": "3.8.3",
