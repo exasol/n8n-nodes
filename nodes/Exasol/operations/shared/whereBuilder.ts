@@ -116,7 +116,7 @@ export function quoteLiteral(value: unknown): string {
 	}
 	if (typeof value === 'number') {
 		if (!Number.isFinite(value)) {
-			throw new Error(`Cannot inline a non-finite number as a SQL literal: ${value}`);
+			throw new TypeError(`Cannot inline a non-finite number as a SQL literal: ${value}`);
 		}
 		return String(value);
 	}
@@ -203,7 +203,8 @@ export function buildWhereClause(
 		params.push(value);
 		return '?';
 	});
-	return { clause: `WHERE ${fragments.join(` ${combinator} `)}`, params };
+	const separator = ` ${combinator} `;
+	return { clause: `WHERE ${fragments.join(separator)}`, params };
 }
 
 /**
@@ -233,5 +234,6 @@ export function buildWhereClauseLiteral(
 	validateCombinator(combinator);
 
 	const fragments = buildConditionFragments(conditions, quoteLiteral);
-	return `WHERE ${fragments.join(` ${combinator} `)}`;
+	const separator = ` ${combinator} `;
+	return `WHERE ${fragments.join(separator)}`;
 }
