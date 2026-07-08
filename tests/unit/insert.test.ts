@@ -183,7 +183,7 @@ describe('Insert operation', () => {
 		const thrown = await node.execute.call(ctx).catch((e) => e);
 
 		expect(thrown).toBeInstanceOf(NodeOperationError);
-		expect((thrown as NodeOperationError).message).toContain('Column name must not be empty');
+		expect((thrown as NodeOperationError).message).toContain('Column name must be a non-empty string.');
 		expect(mockDriver.prepare).not.toHaveBeenCalled();
 	});
 
@@ -199,7 +199,7 @@ describe('Insert operation', () => {
 		const thrown = await node.execute.call(ctx).catch((e) => e);
 
 		expect(thrown).toBeInstanceOf(NodeOperationError);
-		expect((thrown as NodeOperationError).message).toContain('Column name must not be empty');
+		expect((thrown as NodeOperationError).message).toContain('Column name must be a non-empty string.');
 	});
 
 	// A truthy non-string Column (e.g. a number from an expression) passes `column?.trim` being
@@ -213,7 +213,7 @@ describe('Insert operation', () => {
 		const thrown = await node.execute.call(ctx).catch((e) => e);
 
 		expect(thrown).toBeInstanceOf(NodeOperationError);
-		expect((thrown as NodeOperationError).message).toContain('Column name must not be empty');
+		expect((thrown as NodeOperationError).message).toContain('Column name must be a non-empty string.');
 	});
 
 	it('uses null for a later item whose Columns mapping omits a column present in item 0 (defineBelow)', async () => {
