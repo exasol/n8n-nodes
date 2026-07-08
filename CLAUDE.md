@@ -130,7 +130,7 @@ Code reviewers on this project may not be familiar with n8n concepts. Write inli
 
 - Explain n8n-specific types and patterns where they first appear in a file. For example: what `IExecuteFunctions` is, why `getNodeParameter` takes an item index, what `continueOnFail` does, why `loadOptions` returns `INodePropertyOptions[]`.
 - Explain the `INodeProperties` fields in `description.ts` files that are non-obvious (e.g., `displayOptions.show`, `typeOptions.loadOptionsMethod`, fixed-collection structure).
-- Use JSDoc on all exported functions and classes.
+- Use JSDoc (`/** */`) on all functions and classes, exported or not.
 
 ```typescript
 /**
