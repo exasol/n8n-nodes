@@ -12,9 +12,11 @@ const displayOptions = {
 /**
  * INodeProperties entries rendered when operation === 'insert'.
  *
- * Insert batches every n8n input item into a single INSERT statement. Column values for each
- * row come from either the input item's own JSON (Auto-Map Input Data) or an explicit list of
- * column/value pairs configured on the node (Map Each Column Below).
+ * Insert combines every n8n input item into a single multi-row INSERT statement (one VALUES
+ * tuple per item), sent in one round-trip — unlike Select Rows/Update/Delete, which issue one
+ * statement per item. Column values for each row come from either the input item's own JSON
+ * (Auto-Map Input Data) or an explicit list of column/value pairs configured on the node (Map
+ * Each Column Below).
  */
 export const description: INodeProperties[] = [
 	...schemaAndTableFields(displayOptions, 'insert into', 'insert rows into'),

@@ -18,9 +18,9 @@ function readColumnMappings(
 	return collection.mappings ?? [];
 }
 
-// Determines the column list for the whole batch. Insert sends every input item as one row of
-// a single INSERT statement, so the column list — unlike the values — must be identical across
-// all rows; it is therefore only read once, from item 0, rather than per item.
+// Determines the column list for the combined statement. Insert sends every input item as one
+// row of a single multi-row INSERT statement, so the column list — unlike the values — must be
+// identical across all rows; it is therefore only read once, from item 0, rather than per item.
 //
 // Auto-Map Input Data takes its columns from item 0's own JSON keys. Map Each Column Below takes
 // them from the "Columns" collection configured on the node (also read at item 0, since the
@@ -32,11 +32,8 @@ function readColumns(
 ): string[] {
 	if (dataMode === 'defineBelow') {
 		const columns = readColumnMappings(context, 0).map((mapping) => mapping.column);
-		// `?.trim()` alone only guards null/undefined — a Column field driven by an expression can
-		// resolve to a truthy non-string (e.g. a number), which is caught here via typeof instead
-		// of letting `.trim()` throw a raw, confusing TypeError.
 		if (columns.some((column) => typeof column !== 'string' || !column.trim())) {
-			throw new NodeOperationError(context.getNode(), 'Column name must not be empty.', {
+			throw new NodeOperationError(context.getNode(), 'Column name must be a non-empty string.', {
 				itemIndex: 0,
 			});
 		}
@@ -98,10 +95,10 @@ function buildInsertQuery(
 	return `INSERT INTO ${quoteIdentifier(schema)}.${quoteIdentifier(table)} (${columnList}) VALUES ${values}`;
 }
 
-// Runs the batched INSERT via prepare() + stmt.execute(), which prevents SQL injection on the
-// bound values (identifiers are quoted separately by buildInsertQuery via quoteIdentifier).
-// A missing rowCount is treated as zero affected rows rather than crashing, mirroring
-// mapSingleResult()'s same defensive fallback in executeQuery/execute.ts.
+// Runs the combined multi-row INSERT via prepare() + stmt.execute(), which prevents SQL
+// injection on the bound values (identifiers are quoted separately by buildInsertQuery via
+// quoteIdentifier). A missing rowCount is treated as zero affected rows rather than crashing,
+// mirroring mapSingleResult()'s same defensive fallback in executeQuery/execute.ts.
 async function runInsert(driver: ExasolDriver, query: string, params: unknown[]): Promise<number> {
 	const stmt = await driver.prepare(query);
 	try {
@@ -119,11 +116,11 @@ async function runInsert(driver: ExasolDriver, query: string, params: unknown[])
  * Executes the "Insert" operation for all n8n input items.
  *
  * Unlike Select Rows, Update, and Delete — which run one statement per input item — Insert
- * batches every item into a single INSERT statement (one VALUES tuple per item) and sends it in
- * one round-trip, regardless of how many items there are. This means the operation succeeds or
- * fails as a whole rather than per item: a single output item is returned, carrying either
- * `{ affectedRows: N }` or (with `continueOnFail`) the error, with `pairedItem` referencing every
- * input item.
+ * combines every item into a single multi-row INSERT statement (one VALUES tuple per item) and
+ * sends it in one round-trip, regardless of how many items there are. This means the operation
+ * succeeds or fails as a whole rather than per item: a single output item is returned, carrying
+ * either `{ affectedRows: N }` or (with `continueOnFail`) the error, with `pairedItem` referencing
+ * every input item.
  *
  * Called with `this` bound to IExecuteFunctions so n8n's per-item parameter APIs are available
  * without passing the context explicitly.
