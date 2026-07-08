@@ -24,6 +24,8 @@ import {
 	insert,
 	updateDescription,
 	update,
+	deleteDescription,
+	deleteRows,
 } from './operations';
 import { resultSetToRows } from './operations/shared/resultMapper';
 
@@ -117,6 +119,12 @@ export class Exasol implements INodeType {
 				noDataExpression: true,
 				options: [
 					{
+						name: 'Delete',
+						value: 'delete',
+						description: 'Delete rows from a table using structured filters',
+						action: 'Delete rows',
+					},
+					{
 						name: 'Execute Query',
 						value: 'executeQuery',
 						description: 'Execute one or more SQL statements',
@@ -147,6 +155,7 @@ export class Exasol implements INodeType {
 			...selectRowsDescription,
 			...insertDescription,
 			...updateDescription,
+			...deleteDescription,
 		],
 	};
 
@@ -267,6 +276,8 @@ export class Exasol implements INodeType {
 				return [await insert.call(this, driver, items)];
 			} else if (operation === 'update') {
 				return [await update.call(this, driver, items)];
+			} else if (operation === 'delete') {
+				return [await deleteRows.call(this, driver, items)];
 			} else {
 				throw new NodeOperationError(this.getNode(), `Unknown operation: ${operation}`);
 			}

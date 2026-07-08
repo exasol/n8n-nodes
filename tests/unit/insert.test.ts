@@ -9,6 +9,7 @@ import {
 	type MockDriver,
 	type MockStatement,
 } from './testHelpers/mockDriver';
+import { itValidatesSchemaAndTable } from './testHelpers/schemaTableValidation';
 import { Exasol } from '../../nodes/Exasol/Exasol.node';
 
 describe('Insert operation', () => {
@@ -334,38 +335,13 @@ describe('Insert operation', () => {
 
 	// ── Validation ───────────────────────────────────────────────────────────────
 
-	it('throws NodeOperationError for an empty Schema without wrapping it a second time', async () => {
-		const ctx = makeContext({ schema: '' });
-
-		const thrown = await node.execute.call(ctx).catch((e) => e);
-
-		expect(thrown).toBeInstanceOf(NodeOperationError);
-		expect((thrown as NodeOperationError).message).toContain('Schema must not be empty');
-		expect(mockDriver.prepare).not.toHaveBeenCalled();
-	});
-
-	it('throws NodeOperationError for an empty Table', async () => {
-		const ctx = makeContext({ table: '' });
-
-		const thrown = await node.execute.call(ctx).catch((e) => e);
-
-		expect(thrown).toBeInstanceOf(NodeOperationError);
-		expect((thrown as NodeOperationError).message).toContain('Table must not be empty');
-	});
-
-	it('trims surrounding whitespace from Schema and Table before quoting them', async () => {
-		await node.execute.call(makeContext({ schema: '  MY_SCHEMA  ', table: '  MY_TABLE  ' }));
-
-		expect(mockDriver.prepare).toHaveBeenCalledWith(
-			'INSERT INTO "MY_SCHEMA"."MY_TABLE" ("ID", "NAME") VALUES (?, ?)',
-		);
-	});
-
-	it('stores an empty-Schema error in json when continueOnFail is true', async () => {
-		const ctx = makeContext({ schema: '', continueOnFail: true });
-
-		const [[item]] = await node.execute.call(ctx);
-
-		expect(item.json).toMatchObject({ error: expect.stringContaining('Schema must not be empty') });
+	itValidatesSchemaAndTable({
+		execute: (ctx) => node.execute.call(ctx),
+		makeContext,
+		assertNotExecuted: () => expect(mockDriver.prepare).not.toHaveBeenCalled(),
+		assertTrimmedSqlExecuted: () =>
+			expect(mockDriver.prepare).toHaveBeenCalledWith(
+				'INSERT INTO "MY_SCHEMA"."MY_TABLE" ("ID", "NAME") VALUES (?, ?)',
+			),
 	});
 });

@@ -99,16 +99,90 @@ export function quoteIdentifier(identifier: string): string {
 }
 
 /**
+ * Renders a JS value as an inline SQL literal, for statements that cannot bind it as a `?`
+ * parameter (see buildWhereClauseLiteral() below for why Delete needs this). Strings are
+ * single-quoted with embedded quotes doubled — the same escaping technique quoteIdentifier()
+ * uses for identifiers, applied here to values instead, so a user-supplied value can't break out
+ * of the quotes to inject arbitrary SQL. Anything that isn't a string/number/boolean/nullish
+ * (e.g. an object or array, which the "Value" field can produce via an n8n expression) is
+ * stringified and quoted the same way as a string, rather than left as `[object Object]` unquoted.
+ */
+export function quoteLiteral(value: unknown): string {
+	if (value === null || value === undefined) {
+		return 'NULL';
+	}
+	if (typeof value === 'boolean') {
+		return value ? 'TRUE' : 'FALSE';
+	}
+	if (typeof value === 'number') {
+		if (!Number.isFinite(value)) {
+			throw new Error(`Cannot inline a non-finite number as a SQL literal: ${value}`);
+		}
+		return String(value);
+	}
+	// NOSONAR: same /g-regex-instead-of-replaceAll rationale as quoteIdentifier() above.
+	return `'${String(value).replace(/'/g, "''")}'`; // NOSONAR
+}
+
+/**
+ * Validates a "Combine Conditions" value against the AND/OR allow-list. `combinator` is typed
+ * loosely (`unknown`) even though the UI only offers "AND"/"OR" — it's also settable via an n8n
+ * expression, which can resolve to any string at runtime. Since it's concatenated straight into
+ * the SQL text (it isn't an identifier quoteIdentifier() can escape, nor a value that can be
+ * bound as `?`), it's checked against an explicit allow-list here instead of trusted at the type
+ * level.
+ *
+ * @throws Error when `combinator` is neither "AND" nor "OR"
+ */
+function validateCombinator(combinator: unknown): asserts combinator is 'AND' | 'OR' {
+	if (combinator !== 'AND' && combinator !== 'OR') {
+		throw new Error(
+			`Invalid Where combinator: ${JSON.stringify(combinator)}. Expected "AND" or "OR".`,
+		);
+	}
+}
+
+/**
+ * Builds one `"column" OP <value>` fragment per condition (or `"column" OP` for IS NULL / IS NOT
+ * NULL, which take no value) — the piece shared by both buildWhereClause() (bind-parameter
+ * values) and buildWhereClauseLiteral() (inline-literal values). `renderValue` supplies the
+ * OP's right-hand side and is the only difference between the two callers.
+ *
+ * @throws Error when a condition's operator is outside the known allow-list, or its column is empty
+ */
+function buildConditionFragments(
+	conditions: WhereCondition[],
+	renderValue: (value: unknown) => string,
+): string[] {
+	return conditions.map((condition) => {
+		if (!KNOWN_OPERATORS.has(condition.operator)) {
+			throw new Error(`Invalid Where operator: ${JSON.stringify(condition.operator)}.`);
+		}
+		// "Column" is typed as a string field in the UI, which only stops an empty default from
+		// being saved — an n8n expression can still resolve it to '', a number, or any other type
+		// at runtime. Without this guard a non-string would crash on .trim() below with a raw
+		// TypeError, and an empty column would reach quoteIdentifier() unchecked, producing
+		// `WHERE "" = ?` and an opaque Exasol syntax error — both instead of a clear validation
+		// message.
+		if (typeof condition.column !== 'string' || !condition.column.trim()) {
+			throw new Error('Where column must be a non-empty string.');
+		}
+		const column = quoteIdentifier(condition.column);
+		const operatorSql = OPERATOR_SQL[condition.operator];
+		if (NULLARY_OPERATORS.has(condition.operator)) {
+			return `${column} ${operatorSql}`;
+		}
+		return `${column} ${operatorSql} ${renderValue(condition.value)}`;
+	});
+}
+
+/**
  * Builds a parameterized WHERE clause from the "Where" fixed-collection parameter. Each
  * condition becomes `"column" OP ?` (or `"column" OP` for IS NULL / IS NOT NULL, which take no
  * value), joined by `combinator`.
  *
- * `combinator` and each condition's `operator` are typed loosely (`unknown`) even though the
- * "AND"/"OR" and WhereOperator literal unions describe the values n8n's UI can produce — both
- * are also settable via an n8n expression, which can resolve to any string at runtime and
- * bypass those types entirely. Since both are concatenated straight into the SQL text (neither
- * is an identifier that quoteIdentifier() can escape, nor a value that can be bound as `?`),
- * they're validated against an explicit allow-list here instead of trusted at the type level.
+ * Used by Select Rows and Update, both of which run their statement via prepare() + bound
+ * parameters. Delete cannot use this — see buildWhereClauseLiteral() below.
  *
  * @param conditions - one entry per "Where" row; an empty array yields no WHERE clause at all
  * @param combinator - how multiple conditions combine; irrelevant when fewer than two are given
@@ -122,33 +196,42 @@ export function buildWhereClause(
 	if (conditions.length === 0) {
 		return { clause: '', params: [] };
 	}
-	if (combinator !== 'AND' && combinator !== 'OR') {
-		throw new Error(
-			`Invalid Where combinator: ${JSON.stringify(combinator)}. Expected "AND" or "OR".`,
-		);
-	}
+	validateCombinator(combinator);
 
 	const params: unknown[] = [];
-	const fragments = conditions.map((condition) => {
-		if (!KNOWN_OPERATORS.has(condition.operator)) {
-			throw new Error(`Invalid Where operator: ${JSON.stringify(condition.operator)}.`);
-		}
-		// "Column" is required in the UI, which only stops an empty default from being saved —
-		// an n8n expression can still resolve it to '' at runtime. Without this guard an empty
-		// column would reach quoteIdentifier() unchecked, producing `WHERE "" = ?` and an opaque
-		// Exasol syntax error instead of a clear validation message.
-		if (!condition.column?.trim()) {
-			throw new Error('Where column must not be empty.');
-		}
-		const column = quoteIdentifier(condition.column);
-		const operatorSql = OPERATOR_SQL[condition.operator];
-		if (NULLARY_OPERATORS.has(condition.operator)) {
-			return `${column} ${operatorSql}`;
-		}
-		params.push(condition.value);
-		return `${column} ${operatorSql} ?`;
+	const fragments = buildConditionFragments(conditions, (value) => {
+		params.push(value);
+		return '?';
 	});
+	return { clause: `WHERE ${fragments.join(` ${combinator} `)}`, params };
+}
 
-	const separator = ` ${combinator} `;
-	return { clause: `WHERE ${fragments.join(separator)}`, params };
+/**
+ * Builds a WHERE clause with values inlined as SQL literals (via quoteLiteral()) instead of
+ * bound `?` placeholders.
+ *
+ * Exasol's *prepared* DELETE statement only accepts parameterized conditions of the exact shape
+ * `<column> = ?` (ANDed together) — anything else, including `>`/`LIKE`/`!=` or an `OR`
+ * combinator, is rejected server-side ("Feature not supported: Prepared DELETE with
+ * parameterized condition other than <column name> = ? or unsupported type"). That restriction
+ * is specific to DELETE — it doesn't apply to UPDATE or SELECT — and it would silently break
+ * most of the operator dropdown on the "Where" field (shared with Select Rows and Update) if
+ * Delete also bound its WHERE values as `?` through a prepared statement. Delete therefore
+ * inlines its WHERE values as literals and runs the statement unprepared, via driver.query().
+ *
+ * @param conditions - one entry per "Where" row; an empty array yields no WHERE clause at all
+ * @param combinator - how multiple conditions combine; irrelevant when fewer than two are given
+ * @returns SQL fragment starting with "WHERE", or "" when `conditions` is empty
+ */
+export function buildWhereClauseLiteral(
+	conditions: WhereCondition[],
+	combinator: unknown = 'AND',
+): string {
+	if (conditions.length === 0) {
+		return '';
+	}
+	validateCombinator(combinator);
+
+	const fragments = buildConditionFragments(conditions, quoteLiteral);
+	return `WHERE ${fragments.join(` ${combinator} `)}`;
 }

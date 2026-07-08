@@ -1,6 +1,9 @@
 import type { ExasolDriver } from '@exasol/exasol-driver-ts';
 
-import { runStatement } from '../../nodes/Exasol/operations/shared/statementRunner';
+import {
+	runRawStatement,
+	runStatement,
+} from '../../nodes/Exasol/operations/shared/statementRunner';
 
 type MockStatement = {
 	execute: jest.Mock;
@@ -70,8 +73,8 @@ describe('runStatement()', () => {
 		expect(affectedRows).toBe(0);
 	});
 
-	it('falls back to zero affected rows when responseData is missing entirely', async () => {
-		mockStatement.execute.mockResolvedValue({ status: 'ok' });
+	it('falls back to zero affected rows when results is missing from responseData', async () => {
+		mockStatement.execute.mockResolvedValue({ status: 'ok', responseData: {} });
 
 		const affectedRows = await runStatement(
 			mockDriver as unknown as ExasolDriver,
@@ -81,6 +84,19 @@ describe('runStatement()', () => {
 		);
 
 		expect(affectedRows).toBe(0);
+	});
+
+	it('throws the failure message when responseData is missing entirely', async () => {
+		mockStatement.execute.mockResolvedValue({ status: 'ok' });
+
+		await expect(
+			runStatement(
+				mockDriver as unknown as ExasolDriver,
+				'UPDATE "S"."T" SET "C" = ?',
+				[1],
+				'Statement failed',
+			),
+		).rejects.toThrow('Statement failed');
 	});
 
 	it('throws the exception text when the response status is an error', async () => {
@@ -128,5 +144,106 @@ describe('runStatement()', () => {
 		);
 
 		expect(affectedRows).toBe(1);
+	});
+});
+
+describe('runRawStatement()', () => {
+	let mockDriver: { query: jest.Mock };
+
+	beforeEach(() => {
+		mockDriver = { query: jest.fn().mockResolvedValue(rowCountResult(1)) };
+	});
+
+	it('queries with the raw response type and returns the rowCount from a successful response', async () => {
+		mockDriver.query.mockResolvedValue(rowCountResult(3));
+
+		const affectedRows = await runRawStatement(
+			mockDriver as unknown as ExasolDriver,
+			'DELETE FROM "S"."T" WHERE "ID" = 1',
+			'Statement failed',
+		);
+
+		expect(mockDriver.query).toHaveBeenCalledWith(
+			'DELETE FROM "S"."T" WHERE "ID" = 1',
+			undefined,
+			undefined,
+			'raw',
+		);
+		expect(affectedRows).toBe(3);
+	});
+
+	it('falls back to zero affected rows when rowCount is missing from the response', async () => {
+		mockDriver.query.mockResolvedValue({ status: 'ok', responseData: { results: [{}] } });
+
+		const affectedRows = await runRawStatement(
+			mockDriver as unknown as ExasolDriver,
+			'DELETE FROM "S"."T" WHERE "ID" = 1',
+			'Statement failed',
+		);
+
+		expect(affectedRows).toBe(0);
+	});
+
+	it('falls back to zero affected rows when the results array is empty', async () => {
+		mockDriver.query.mockResolvedValue({ status: 'ok', responseData: { results: [] } });
+
+		const affectedRows = await runRawStatement(
+			mockDriver as unknown as ExasolDriver,
+			'DELETE FROM "S"."T" WHERE "ID" = 1',
+			'Statement failed',
+		);
+
+		expect(affectedRows).toBe(0);
+	});
+
+	it('falls back to zero affected rows when results is missing from responseData', async () => {
+		mockDriver.query.mockResolvedValue({ status: 'ok', responseData: {} });
+
+		const affectedRows = await runRawStatement(
+			mockDriver as unknown as ExasolDriver,
+			'DELETE FROM "S"."T" WHERE "ID" = 1',
+			'Statement failed',
+		);
+
+		expect(affectedRows).toBe(0);
+	});
+
+	it('throws the failure message when responseData is missing entirely', async () => {
+		mockDriver.query.mockResolvedValue({ status: 'ok' });
+
+		await expect(
+			runRawStatement(
+				mockDriver as unknown as ExasolDriver,
+				'DELETE FROM "S"."T" WHERE "ID" = 1',
+				'Statement failed',
+			),
+		).rejects.toThrow('Statement failed');
+	});
+
+	it('throws the exception text when the response status is an error', async () => {
+		mockDriver.query.mockResolvedValue({
+			status: 'error',
+			exception: { text: 'column not found' },
+		});
+
+		await expect(
+			runRawStatement(
+				mockDriver as unknown as ExasolDriver,
+				'DELETE FROM "S"."T"',
+				'Statement failed',
+			),
+		).rejects.toThrow('column not found');
+	});
+
+	it('falls back to the provided failure message when the error response has no exception text', async () => {
+		mockDriver.query.mockResolvedValue({ status: 'error' });
+
+		await expect(
+			runRawStatement(
+				mockDriver as unknown as ExasolDriver,
+				'DELETE FROM "S"."T"',
+				'Statement failed',
+			),
+		).rejects.toThrow('Statement failed');
 	});
 });

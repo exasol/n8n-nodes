@@ -1,24 +1,11 @@
 import type { IExecuteFunctions, INodeExecutionData } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
 
-import { ExasolDriver } from '@exasol/exasol-driver-ts';
+// Must be imported before Exasol.node below: this module calls jest.mock('@exasol/exasol-driver-ts'),
+// which only replaces the driver for modules required afterwards in this file's require order.
+import { setupMockDriver, type MockDriver, type MockStatement } from './testHelpers/mockDriver';
+import { itValidatesSchemaAndTable } from './testHelpers/schemaTableValidation';
 import { Exasol } from '../../nodes/Exasol/Exasol.node';
-
-jest.mock('@exasol/exasol-driver-ts');
-
-const MockedExasolDriver = jest.mocked(ExasolDriver);
-
-type MockStatement = {
-	execute: jest.Mock;
-	close: jest.Mock;
-};
-
-type MockDriver = {
-	connect: jest.Mock;
-	close: jest.Mock;
-	query: jest.Mock;
-	prepare: jest.Mock;
-};
 
 // Builds the SQLResponse<SQLQueriesResponse> shape returned by both driver.query(..., 'raw')
 // and stmt.execute() for a SELECT result. The Exasol wire format is column-major:
@@ -53,17 +40,9 @@ describe('Select Rows operation', () => {
 
 	beforeEach(() => {
 		node = new Exasol();
-		mockStatement = {
-			execute: jest.fn().mockResolvedValue(selectResult([])),
-			close: jest.fn().mockResolvedValue(undefined),
-		};
-		mockDriver = {
-			connect: jest.fn().mockResolvedValue(undefined),
-			close: jest.fn().mockResolvedValue(undefined),
-			query: jest.fn().mockResolvedValue(selectResult([])),
-			prepare: jest.fn().mockResolvedValue(mockStatement),
-		};
-		MockedExasolDriver.mockImplementation(() => mockDriver as unknown as ExasolDriver);
+		({ mockDriver, mockStatement } = setupMockDriver());
+		mockStatement.execute.mockResolvedValue(selectResult([]));
+		mockDriver.query.mockResolvedValue(selectResult([]));
 	});
 
 	afterEach(() => {
@@ -559,24 +538,24 @@ describe('Select Rows operation', () => {
 
 	// ── Validation ───────────────────────────────────────────────────────────────
 
-	it('throws NodeOperationError for an empty Schema without wrapping it a second time', async () => {
-		const ctx = makeContext({ schema: '' });
-
-		const thrown = await node.execute.call(ctx).catch((e) => e);
-
-		expect(thrown).toBeInstanceOf(NodeOperationError);
-		expect((thrown as NodeOperationError).message).toContain('Schema must not be empty');
-		expect(mockDriver.query).not.toHaveBeenCalled();
-		expect(mockDriver.prepare).not.toHaveBeenCalled();
-	});
-
-	it('throws NodeOperationError for an empty Table', async () => {
-		const ctx = makeContext({ table: '' });
-
-		const thrown = await node.execute.call(ctx).catch((e) => e);
-
-		expect(thrown).toBeInstanceOf(NodeOperationError);
-		expect((thrown as NodeOperationError).message).toContain('Table must not be empty');
+	itValidatesSchemaAndTable({
+		execute: (ctx) => node.execute.call(ctx),
+		makeContext,
+		assertNotExecuted: () => {
+			expect(mockDriver.query).not.toHaveBeenCalled();
+			expect(mockDriver.prepare).not.toHaveBeenCalled();
+		},
+		// A leading/trailing-whitespace Schema or Table must not be quoted verbatim as a SQL
+		// identifier — Exasol would treat " MY_SCHEMA" as a literal name containing a space, which
+		// never matches the real schema and fails with a confusing not-found error instead of the
+		// clear validation message this trims down to.
+		assertTrimmedSqlExecuted: () =>
+			expect(mockDriver.query).toHaveBeenCalledWith(
+				'SELECT * FROM "MY_SCHEMA"."MY_TABLE"',
+				undefined,
+				undefined,
+				'raw',
+			),
 	});
 
 	it('throws NodeOperationError for a whitespace-only Schema', async () => {
@@ -586,29 +565,6 @@ describe('Select Rows operation', () => {
 
 		expect(thrown).toBeInstanceOf(NodeOperationError);
 		expect((thrown as NodeOperationError).message).toContain('Schema must not be empty');
-	});
-
-	// A leading/trailing-whitespace Schema or Table must not be quoted verbatim as a SQL
-	// identifier — Exasol would treat " MY_SCHEMA" as a literal name containing a space, which
-	// never matches the real schema and fails with a confusing not-found error instead of the
-	// clear validation message this trims down to.
-	it('trims surrounding whitespace from Schema and Table before quoting them', async () => {
-		await node.execute.call(makeContext({ schema: '  MY_SCHEMA  ', table: '  MY_TABLE  ' }));
-
-		expect(mockDriver.query).toHaveBeenCalledWith(
-			'SELECT * FROM "MY_SCHEMA"."MY_TABLE"',
-			undefined,
-			undefined,
-			'raw',
-		);
-	});
-
-	it('stores an empty-Schema error in json when continueOnFail is true', async () => {
-		const ctx = makeContext({ schema: '', continueOnFail: true });
-
-		const [[item]] = await node.execute.call(ctx);
-
-		expect(item.json).toMatchObject({ error: expect.stringContaining('Schema must not be empty') });
 	});
 
 	it('continues processing later items after an earlier one fails with continueOnFail', async () => {

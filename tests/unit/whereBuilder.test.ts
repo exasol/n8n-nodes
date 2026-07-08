@@ -1,6 +1,8 @@
 import {
 	buildWhereClause,
+	buildWhereClauseLiteral,
 	quoteIdentifier,
+	quoteLiteral,
 } from '../../nodes/Exasol/operations/shared/whereBuilder';
 import type { WhereCondition } from '../../nodes/Exasol/operations/shared/whereBuilder';
 
@@ -154,12 +156,121 @@ describe('buildWhereClause()', () => {
 	it('rejects an empty Where column', () => {
 		const conditions: WhereCondition[] = [{ column: '', operator: 'equals', value: 1 }];
 
-		expect(() => buildWhereClause(conditions)).toThrow(/Where column must not be empty/);
+		expect(() => buildWhereClause(conditions)).toThrow(/Where column must be a non-empty string/);
 	});
 
 	it('rejects a whitespace-only Where column', () => {
 		const conditions: WhereCondition[] = [{ column: '   ', operator: 'equals', value: 1 }];
 
-		expect(() => buildWhereClause(conditions)).toThrow(/Where column must not be empty/);
+		expect(() => buildWhereClause(conditions)).toThrow(/Where column must be a non-empty string/);
+	});
+
+	it('rejects a non-string Where column instead of crashing on .trim()', () => {
+		const conditions = [
+			{ column: 123, operator: 'equals', value: 1 },
+		] as unknown as WhereCondition[];
+
+		expect(() => buildWhereClause(conditions)).toThrow(/Where column must be a non-empty string/);
+	});
+});
+
+describe('quoteLiteral()', () => {
+	it('renders null as the NULL keyword', () => {
+		expect(quoteLiteral(null)).toBe('NULL');
+	});
+
+	it('renders undefined as the NULL keyword', () => {
+		expect(quoteLiteral(undefined)).toBe('NULL');
+	});
+
+	it('renders true/false as the TRUE/FALSE keywords', () => {
+		expect(quoteLiteral(true)).toBe('TRUE');
+		expect(quoteLiteral(false)).toBe('FALSE');
+	});
+
+	it('renders a number without quotes', () => {
+		expect(quoteLiteral(42)).toBe('42');
+		expect(quoteLiteral(-3.5)).toBe('-3.5');
+	});
+
+	it('rejects a non-finite number', () => {
+		expect(() => quoteLiteral(Infinity)).toThrow(/non-finite number/);
+		expect(() => quoteLiteral(NaN)).toThrow(/non-finite number/);
+	});
+
+	it('quotes a string and escapes an embedded single quote by doubling it', () => {
+		expect(quoteLiteral("O'Brien")).toBe("'O''Brien'");
+	});
+
+	it('stringifies and quotes a value of another type', () => {
+		expect(quoteLiteral(['a', 'b'])).toBe("'a,b'");
+	});
+});
+
+describe('buildWhereClauseLiteral()', () => {
+	it('returns an empty clause for an empty condition list', () => {
+		expect(buildWhereClauseLiteral([])).toBe('');
+	});
+
+	it('inlines a single equals condition as a literal', () => {
+		const result = buildWhereClauseLiteral([{ column: 'ID', operator: 'equals', value: 1 }]);
+
+		expect(result).toBe('WHERE "ID" = 1');
+	});
+
+	it('inlines a string value, quoted', () => {
+		const result = buildWhereClauseLiteral([{ column: 'NAME', operator: 'equals', value: 'x' }]);
+
+		expect(result).toBe(`WHERE "NAME" = 'x'`);
+	});
+
+	it('renders IS NULL with no operand', () => {
+		const result = buildWhereClauseLiteral([{ column: 'NAME', operator: 'isNull' }]);
+
+		expect(result).toBe('WHERE "NAME" IS NULL');
+	});
+
+	it('joins multiple conditions with AND by default', () => {
+		const conditions: WhereCondition[] = [
+			{ column: 'A', operator: 'equals', value: 1 },
+			{ column: 'B', operator: 'greaterThan', value: 2 },
+		];
+
+		expect(buildWhereClauseLiteral(conditions)).toBe('WHERE "A" = 1 AND "B" > 2');
+	});
+
+	it('joins multiple conditions with OR when requested', () => {
+		const conditions: WhereCondition[] = [
+			{ column: 'A', operator: 'equals', value: 1 },
+			{ column: 'B', operator: 'equals', value: 2 },
+		];
+
+		expect(buildWhereClauseLiteral(conditions, 'OR')).toBe('WHERE "A" = 1 OR "B" = 2');
+	});
+
+	it('rejects a combinator that is not AND or OR', () => {
+		const conditions: WhereCondition[] = [{ column: 'A', operator: 'equals', value: 1 }];
+
+		expect(() => buildWhereClauseLiteral(conditions, '1=1; DROP SCHEMA X CASCADE; --')).toThrow(
+			/Invalid Where combinator/,
+		);
+	});
+
+	it('rejects an operator outside the known allow-list', () => {
+		const conditions = [{ column: 'A', operator: '1=1 OR "A" = ?' }] as unknown as WhereCondition[];
+
+		expect(() => buildWhereClauseLiteral(conditions)).toThrow(/Invalid Where operator/);
+	});
+
+	it('rejects an empty Where column', () => {
+		const conditions: WhereCondition[] = [{ column: '', operator: 'equals', value: 1 }];
+
+		expect(() => buildWhereClauseLiteral(conditions)).toThrow(/Where column must be a non-empty string/);
+	});
+
+	it('quotes column identifiers, escaping embedded double quotes', () => {
+		const result = buildWhereClauseLiteral([{ column: 'WEIRD"COL', operator: 'equals', value: 1 }]);
+
+		expect(result).toBe('WHERE "WEIRD""COL" = 1');
 	});
 });
