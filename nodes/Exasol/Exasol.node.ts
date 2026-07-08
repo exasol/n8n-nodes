@@ -20,6 +20,8 @@ import {
 	executeQuery,
 	selectRowsDescription,
 	selectRows,
+	insertDescription,
+	insert,
 } from './operations';
 import { resultSetToRows } from './operations/shared/resultMapper';
 
@@ -119,6 +121,12 @@ export class Exasol implements INodeType {
 						action: 'Execute a query',
 					},
 					{
+						name: 'Insert',
+						value: 'insert',
+						description: 'Insert rows into a table',
+						action: 'Insert rows',
+					},
+					{
 						name: 'Select Rows',
 						value: 'selectRows',
 						description: 'Select rows from a table using structured filters',
@@ -129,6 +137,7 @@ export class Exasol implements INodeType {
 			},
 			...executeQueryDescription,
 			...selectRowsDescription,
+			...insertDescription,
 		],
 	};
 
@@ -245,6 +254,8 @@ export class Exasol implements INodeType {
 				return [await executeQuery.call(this, driver, items)];
 			} else if (operation === 'selectRows') {
 				return [await selectRows.call(this, driver, items)];
+			} else if (operation === 'insert') {
+				return [await insert.call(this, driver, items)];
 			} else {
 				throw new NodeOperationError(this.getNode(), `Unknown operation: ${operation}`);
 			}

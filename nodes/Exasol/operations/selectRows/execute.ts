@@ -4,6 +4,7 @@ import { NodeOperationError } from 'n8n-workflow';
 import type { ExasolDriver, SQLQueriesResponse, SQLResponse } from '@exasol/exasol-driver-ts';
 
 import { resultSetToRows } from '../shared/resultMapper';
+import { requireNonEmpty } from '../shared/validation';
 import type { WhereCondition } from '../shared/whereBuilder';
 import { buildWhereClause, quoteIdentifier } from '../shared/whereBuilder';
 
@@ -27,26 +28,6 @@ function readSortRules(
 		rules?: Array<{ column: string; direction: unknown }>;
 	};
 	return collection.rules ?? [];
-}
-
-// Schema and Table are marked required in description.ts, which only stops the UI from saving
-// an empty default — an n8n expression can still resolve to '' (or whitespace) at runtime, so
-// this is validated again here (same pattern as executeQuery's readQuery()). The trimmed value
-// is what gets returned, since the untrimmed original would otherwise be quoted verbatim as a
-// SQL identifier further down and silently fail to match the real schema/table name.
-function requireNonEmpty(
-	context: IExecuteFunctions,
-	value: string,
-	fieldLabel: string,
-	itemIndex: number,
-): string {
-	const trimmed = value.trim();
-	if (!trimmed) {
-		throw new NodeOperationError(context.getNode(), `${fieldLabel} must not be empty`, {
-			itemIndex,
-		});
-	}
-	return trimmed;
 }
 
 // Limit is concatenated straight into the query text (Exasol's LIMIT doesn't take a bound `?`
@@ -204,13 +185,8 @@ export async function execute(
 
 	for (let i = 0; i < items.length; i++) {
 		try {
-			const schema = requireNonEmpty(
-				this,
-				this.getNodeParameter('schema', i) as string,
-				'Schema',
-				i,
-			);
-			const table = requireNonEmpty(this, this.getNodeParameter('table', i) as string, 'Table', i);
+			const schema = requireNonEmpty(this, this.getNodeParameter('schema', i), 'Schema', i);
+			const table = requireNonEmpty(this, this.getNodeParameter('table', i), 'Table', i);
 			const combineConditions = this.getNodeParameter('combineConditions', i, 'AND');
 			const where = buildWhereClause(readWhereConditions(this, i), combineConditions);
 			const sortRules = readSortRules(this, i);
