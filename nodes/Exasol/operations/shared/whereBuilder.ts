@@ -1,3 +1,5 @@
+import type { IExecuteFunctions } from 'n8n-workflow';
+
 /**
  * Comparison operators exposed by the "Where" fixed-collection field used by Select Rows,
  * and (in later PRs) Update and Delete. Values match the `value`s of the "Operator" dropdown
@@ -61,6 +63,27 @@ const NULLARY_OPERATORS: ReadonlySet<WhereOperator> = new Set(['isNull', 'isNotN
 // a bracket lookup on a plain object, which would resolve inherited properties for values like
 // '__proto__' or 'toString' instead of returning undefined.
 const KNOWN_OPERATORS: ReadonlySet<string> = new Set(Object.keys(OPERATOR_SQL));
+
+/**
+ * Reads the "Where" fixedCollection for one input item. A fixedCollection with
+ * multipleValues returns { conditions: [...] }, or {} when no rows have been added.
+ *
+ * Shared by every operation that filters rows with a "Where" collection (Select Rows, Update,
+ * and — in later PRs — Delete).
+ *
+ * @param context - execute context, used to read the node parameter for this item
+ * @param itemIndex - index of the input item being processed
+ * @returns the configured WHERE conditions, or an empty array if none were added
+ */
+export function readWhereConditions(
+	context: IExecuteFunctions,
+	itemIndex: number,
+): WhereCondition[] {
+	const collection = context.getNodeParameter('where', itemIndex, {}) as {
+		conditions?: WhereCondition[];
+	};
+	return collection.conditions ?? [];
+}
 
 /**
  * Wraps a SQL identifier (schema, table, or column name) in double quotes so Exasol preserves

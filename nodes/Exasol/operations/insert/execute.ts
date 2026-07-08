@@ -3,20 +3,10 @@ import { NodeOperationError } from 'n8n-workflow';
 
 import type { ExasolDriver } from '@exasol/exasol-driver-ts';
 
+import { readColumnMappings } from '../shared/columnMappings';
+import { runStatement } from '../shared/statementRunner';
 import { requireNonEmpty } from '../shared/validation';
 import { quoteIdentifier } from '../shared/whereBuilder';
-
-// Reads the "Columns" fixedCollection for one input item. A fixedCollection with
-// multipleValues returns { mappings: [...] }, or {} when no rows have been added.
-function readColumnMappings(
-	context: IExecuteFunctions,
-	itemIndex: number,
-): Array<{ column: string; value?: unknown }> {
-	const collection = context.getNodeParameter('columns', itemIndex, {}) as {
-		mappings?: Array<{ column: string; value?: unknown }>;
-	};
-	return collection.mappings ?? [];
-}
 
 // Determines the column list for the combined statement. Insert sends every input item as one
 // row of a single multi-row INSERT statement, so the column list — unlike the values — must be
@@ -95,23 +85,6 @@ function buildInsertQuery(
 	return `INSERT INTO ${quoteIdentifier(schema)}.${quoteIdentifier(table)} (${columnList}) VALUES ${values}`;
 }
 
-// Runs the combined multi-row INSERT via prepare() + stmt.execute(), which prevents SQL
-// injection on the bound values (identifiers are quoted separately by buildInsertQuery via
-// quoteIdentifier). A missing rowCount is treated as zero affected rows rather than crashing,
-// mirroring mapSingleResult()'s same defensive fallback in executeQuery/execute.ts.
-async function runInsert(driver: ExasolDriver, query: string, params: unknown[]): Promise<number> {
-	const stmt = await driver.prepare(query);
-	try {
-		const response = await stmt.execute(...params);
-		if (response.status === 'error') {
-			throw new Error(response.exception?.text || 'Insert failed');
-		}
-		return response.responseData?.results?.[0]?.rowCount ?? 0;
-	} finally {
-		await stmt.close().catch(() => {});
-	}
-}
-
 /**
  * Executes the "Insert" operation for all n8n input items.
  *
@@ -156,10 +129,10 @@ export async function execute(
 		const query = buildInsertQuery(schema, table, columns, items.length);
 
 		try {
-			const affectedRows = await runInsert(driver, query, rows.flat());
+			const affectedRows = await runStatement(driver, query, rows.flat(), 'Insert failed');
 			return [{ json: { affectedRows }, pairedItem }];
 		} catch (error) {
-			// Neither the driver nor runInsert() include the SQL text in their error messages, so
+			// Neither the driver nor runStatement() include the SQL text in their error messages, so
 			// it's appended here — mirrors the identical pattern in selectRows/execute.ts.
 			throw new NodeOperationError(
 				this.getNode(),

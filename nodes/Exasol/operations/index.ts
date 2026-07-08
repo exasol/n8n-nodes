@@ -4,3 +4,5 @@ export { description as selectRowsDescription } from './selectRows/description';
 export { execute as selectRows } from './selectRows/execute';
 export { description as insertDescription } from './insert/description';
 export { execute as insert } from './insert/execute';
+export { description as updateDescription } from './update/description';
+export { execute as update } from './update/execute';

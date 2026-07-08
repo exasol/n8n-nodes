@@ -1,36 +1,15 @@
 import type { IExecuteFunctions, INodeExecutionData } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
 
-import { ExasolDriver } from '@exasol/exasol-driver-ts';
+// Must be imported before Exasol.node below: this module calls jest.mock('@exasol/exasol-driver-ts'),
+// which only replaces the driver for modules required afterwards in this file's require order.
+import {
+	rowCountResult,
+	setupMockDriver,
+	type MockDriver,
+	type MockStatement,
+} from './testHelpers/mockDriver';
 import { Exasol } from '../../nodes/Exasol/Exasol.node';
-
-jest.mock('@exasol/exasol-driver-ts');
-
-const MockedExasolDriver = jest.mocked(ExasolDriver);
-
-type MockStatement = {
-	execute: jest.Mock;
-	close: jest.Mock;
-};
-
-type MockDriver = {
-	connect: jest.Mock;
-	close: jest.Mock;
-	query: jest.Mock;
-	prepare: jest.Mock;
-};
-
-// Builds the SQLResponse<SQLQueriesResponse> shape returned by stmt.execute() for a
-// rowCount-typed result (INSERT/UPDATE/DELETE have no result set to return).
-function rowCountResult(rowCount: number) {
-	return {
-		status: 'ok',
-		responseData: {
-			numResults: 1,
-			results: [{ resultType: 'rowCount', rowCount }],
-		},
-	};
-}
 
 describe('Insert operation', () => {
 	let node: Exasol;
@@ -39,17 +18,7 @@ describe('Insert operation', () => {
 
 	beforeEach(() => {
 		node = new Exasol();
-		mockStatement = {
-			execute: jest.fn().mockResolvedValue(rowCountResult(0)),
-			close: jest.fn().mockResolvedValue(undefined),
-		};
-		mockDriver = {
-			connect: jest.fn().mockResolvedValue(undefined),
-			close: jest.fn().mockResolvedValue(undefined),
-			query: jest.fn(),
-			prepare: jest.fn().mockResolvedValue(mockStatement),
-		};
-		MockedExasolDriver.mockImplementation(() => mockDriver as unknown as ExasolDriver);
+		({ mockDriver, mockStatement } = setupMockDriver());
 	});
 
 	afterEach(() => {

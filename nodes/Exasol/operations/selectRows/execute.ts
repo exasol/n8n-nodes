@@ -5,17 +5,7 @@ import type { ExasolDriver, SQLQueriesResponse, SQLResponse } from '@exasol/exas
 
 import { resultSetToRows } from '../shared/resultMapper';
 import { requireNonEmpty } from '../shared/validation';
-import type { WhereCondition } from '../shared/whereBuilder';
-import { buildWhereClause, quoteIdentifier } from '../shared/whereBuilder';
-
-// Reads the "Where" fixedCollection for one input item. A fixedCollection with
-// multipleValues returns { conditions: [...] }, or {} when no rows have been added.
-function readWhereConditions(context: IExecuteFunctions, itemIndex: number): WhereCondition[] {
-	const collection = context.getNodeParameter('where', itemIndex, {}) as {
-		conditions?: WhereCondition[];
-	};
-	return collection.conditions ?? [];
-}
+import { buildWhereClause, quoteIdentifier, readWhereConditions } from '../shared/whereBuilder';
 
 // Reads the "Sort" fixedCollection for one input item, same shape convention as
 // readWhereConditions. `direction` is left as `unknown` — its declared 'ASC' | 'DESC' type is a
