@@ -66,6 +66,61 @@ function assertNoNullConflictValues(
 }
 
 /**
+ * Rejects a batch containing two or more rows with the same combination of conflict-column
+ * values.
+ *
+ * MERGE only ever matches a source row against the *target* table, never against the other
+ * source rows in the same `VALUES` batch — a same-batch duplicate is invisible to the `ON`
+ * clause. What happens next depends on whether that value already exists in the target table:
+ *   - if it does, every duplicate row matches the same target row under `WHEN MATCHED`, and
+ *     Exasol raises "Unable to get a stable set of rows in the source tables" whenever the
+ *     update candidates disagree (per https://docs.exasol.com/db/latest/sql/merge.htm) — an
+ *     error that doesn't say which rows caused it;
+ *   - if it doesn't, every duplicate row independently falls into `WHEN NOT MATCHED` and all of
+ *     them get inserted, silently creating duplicate rows with no error at all.
+ * Rejecting the batch up front, before it reaches the database, turns both outcomes into one
+ * clear, actionable error instead.
+ *
+ * Rows are compared by their conflict-column values rendered via `quoteLiteral()` — the same
+ * literal text that would end up in the `VALUES` list — so two rows only count as duplicates if
+ * they'd produce byte-for-byte identical SQL, matching exactly what Exasol itself would see as
+ * the same source value.
+ *
+ * @throws Error naming the row indexes and the shared conflict-column values, when two or more
+ *   rows share the same combination of conflict-column values
+ */
+function assertNoDuplicateConflictValues(
+	matchColumnIndexes: number[],
+	matchColumns: string[],
+	rows: unknown[][],
+): void {
+	// JSON.stringify() of the per-row literals array is used as the Map key rather than a plain
+	// joined string, so no separator character needs to be chosen — a chosen separator could, in
+	// principle, also appear inside a literal and make two different value combinations collide.
+	const rowsByKey = new Map<string, { literals: string[]; rowIndexes: number[] }>();
+	rows.forEach((row, rowIndex) => {
+		const literals = matchColumnIndexes.map((columnIndex) => quoteLiteral(row[columnIndex]));
+		const key = JSON.stringify(literals);
+		const entry = rowsByKey.get(key) ?? { literals, rowIndexes: [] };
+		entry.rowIndexes.push(rowIndex);
+		rowsByKey.set(key, entry);
+	});
+
+	for (const { literals, rowIndexes } of rowsByKey.values()) {
+		if (rowIndexes.length < 2) continue;
+		const description = matchColumns.map((column, i) => `${column} = ${literals[i]}`).join(', ');
+		throw new Error(
+			`Rows ${rowIndexes.join(', ')} all have the same Conflict Column value(s) (${description}). ` +
+				'Each row in a batch must have a unique combination of Conflict Column values — MERGE ' +
+				'only matches source rows against the target table, not against each other, so ' +
+				'duplicates within the batch either fail with an opaque database error or silently ' +
+				'insert duplicate rows. Deduplicate the input, or add a Conflict Column that ' +
+				'distinguishes these rows.',
+		);
+	}
+}
+
+/**
  * Builds a batched `MERGE INTO ... USING (VALUES ...) ...` statement that upserts every row in
  * one round-trip. Exasol has no `INSERT ... ON CONFLICT` / `ON DUPLICATE KEY UPDATE`, so an
  * upsert has to be expressed as a three-part MERGE instead: a `VALUES`-derived table supplying
@@ -88,8 +143,9 @@ function assertNoNullConflictValues(
  * @param rows - one array of values per input item, in the same column order as `columns`
  * @returns the full MERGE statement text, with every row value inlined as a literal
  * @throws Error when conflictColumns is empty, contains a non-string/blank entry, names a column
- *   outside `columns`, or when any row has a NULL/undefined value for a conflict column (see
- *   assertNoNullConflictValues())
+ *   outside `columns`, when any row has a NULL/undefined value for a conflict column (see
+ *   assertNoNullConflictValues()), or when two or more rows share the same combination of
+ *   conflict-column values (see assertNoDuplicateConflictValues())
  */
 export function buildMergeQuery(
 	schema: string,
@@ -101,11 +157,11 @@ export function buildMergeQuery(
 	const updateColumns = updateColumnsFor(columns, conflictColumns);
 	const matchColumns = conflictColumns as string[];
 	assertNoNullConflictValues(columns, matchColumns, rows);
+	const matchColumnIndexes = matchColumns.map((column) => columns.indexOf(column));
+	assertNoDuplicateConflictValues(matchColumnIndexes, matchColumns, rows);
 
 	const srcColumnList = columns.map(quoteIdentifier).join(', ');
-	const values = rows
-		.map((row) => `(${row.map(quoteLiteral).join(', ')})`)
-		.join(',\n         ');
+	const values = rows.map((row) => `(${row.map(quoteLiteral).join(', ')})`).join(',\n         ');
 
 	const onClause = matchColumns
 		.map((column) => `target.${quoteIdentifier(column)} = src.${quoteIdentifier(column)}`)

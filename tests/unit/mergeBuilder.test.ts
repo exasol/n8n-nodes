@@ -145,15 +145,15 @@ describe('buildMergeQuery()', () => {
 	// a fresh duplicate on every repeated upsert, since NULL = NULL is UNKNOWN, not TRUE.
 
 	it('rejects a row with a null value in a conflict column', () => {
-		expect(() =>
-			buildMergeQuery('S', 'T', ['ID', 'NAME'], ['ID'], [[null, 'a']]),
-		).toThrow(/Row 0 has no value for Conflict Column "ID"/);
+		expect(() => buildMergeQuery('S', 'T', ['ID', 'NAME'], ['ID'], [[null, 'a']])).toThrow(
+			/Row 0 has no value for Conflict Column "ID"/,
+		);
 	});
 
 	it('rejects a row with an undefined value in a conflict column', () => {
-		expect(() =>
-			buildMergeQuery('S', 'T', ['ID', 'NAME'], ['ID'], [[undefined, 'a']]),
-		).toThrow(/Row 0 has no value for Conflict Column "ID"/);
+		expect(() => buildMergeQuery('S', 'T', ['ID', 'NAME'], ['ID'], [[undefined, 'a']])).toThrow(
+			/Row 0 has no value for Conflict Column "ID"/,
+		);
 	});
 
 	it('identifies which row and conflict column failed when several rows are batched', () => {
@@ -172,8 +172,105 @@ describe('buildMergeQuery()', () => {
 	});
 
 	it('does not reject a null value in a non-conflict column', () => {
+		expect(() => buildMergeQuery('S', 'T', ['ID', 'NAME'], ['ID'], [[1, null]])).not.toThrow();
+	});
+
+	// ── Duplicate conflict-column values within a batch ──────────────────────────────
+	// MERGE matches each source row only against the target table, never against the other source
+	// rows in the same batch, so a same-batch duplicate is invisible to the ON clause: it either
+	// hits Exasol's own "Unable to get a stable set of rows in the source tables" error (if it
+	// matches an existing target row) or silently inserts two rows with the same "unique" value (if
+	// it doesn't). Both are rejected up front instead, with a message naming the offending rows.
+
+	it('rejects two rows with the same value for a single conflict column', () => {
 		expect(() =>
-			buildMergeQuery('S', 'T', ['ID', 'NAME'], ['ID'], [[1, null]]),
+			buildMergeQuery(
+				'S',
+				'T',
+				['ID', 'NAME'],
+				['ID'],
+				[
+					[1, 'a'],
+					[1, 'b'],
+				],
+			),
+		).toThrow(/Rows 0, 1 all have the same Conflict Column value\(s\) \(ID = 1\)/);
+	});
+
+	it('rejects three rows sharing the same conflict-column value, naming every row', () => {
+		expect(() =>
+			buildMergeQuery(
+				'S',
+				'T',
+				['ID', 'NAME'],
+				['ID'],
+				[
+					[1, 'a'],
+					[2, 'b'],
+					[1, 'c'],
+				],
+			),
+		).toThrow(/Rows 0, 2 all have the same Conflict Column value\(s\) \(ID = 1\)/);
+	});
+
+	it('rejects duplicate rows only when every conflict column matches', () => {
+		expect(() =>
+			buildMergeQuery(
+				'S',
+				'T',
+				['TENANT_ID', 'ID', 'NAME'],
+				['TENANT_ID', 'ID'],
+				[
+					[1, 1, 'a'],
+					[2, 1, 'b'],
+				],
+			),
+		).not.toThrow();
+	});
+
+	it('rejects two rows matching on every conflict column, naming both values', () => {
+		expect(() =>
+			buildMergeQuery(
+				'S',
+				'T',
+				['TENANT_ID', 'ID', 'NAME'],
+				['TENANT_ID', 'ID'],
+				[
+					[1, 1, 'a'],
+					[1, 1, 'b'],
+				],
+			),
+		).toThrow(/Rows 0, 1 all have the same Conflict Column value\(s\) \(TENANT_ID = 1, ID = 1\)/);
+	});
+
+	it('does not treat different-typed conflict values as duplicates', () => {
+		expect(() =>
+			buildMergeQuery(
+				'S',
+				'T',
+				['ID', 'NAME'],
+				['ID'],
+				[
+					[1, 'a'],
+					['1', 'b'],
+				],
+			),
+		).not.toThrow();
+	});
+
+	it('does not reject rows with distinct conflict-column values', () => {
+		expect(() =>
+			buildMergeQuery(
+				'S',
+				'T',
+				['ID', 'NAME'],
+				['ID'],
+				[
+					[1, 'a'],
+					[2, 'b'],
+					[3, 'c'],
+				],
+			),
 		).not.toThrow();
 	});
 });

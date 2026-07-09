@@ -79,9 +79,7 @@ describe('Upsert operation', () => {
 		});
 		const [result] = await new Exasol().execute.call(ctx);
 
-		expect(result).toEqual([
-			{ json: { affectedRows: 2 }, pairedItem: [{ item: 0 }, { item: 1 }] },
-		]);
+		expect(result).toEqual([{ json: { affectedRows: 2 }, pairedItem: [{ item: 0 }, { item: 1 }] }]);
 		expect(await rowsInItems()).toEqual([
 			{ ID: 1, NAME: 'Val Thorens (updated)', ALTITUDE: 2301 },
 			{ ID: 2, NAME: 'Courchevel', ALTITUDE: 1850 },
@@ -204,7 +202,37 @@ describe('Upsert operation', () => {
 		const thrown = await new Exasol().execute.call(ctx).catch((e) => e);
 
 		expect(thrown).toBeInstanceOf(NodeOperationError);
-		expect((thrown as NodeOperationError).message).toContain('At least one Conflict Column is required');
+		expect((thrown as NodeOperationError).message).toContain(
+			'At least one Conflict Column is required',
+		);
+		expect(await rowsInItems()).toEqual([
+			{ ID: 1, NAME: 'Val Thorens', ALTITUDE: 2300 },
+			{ ID: 2, NAME: 'Courchevel', ALTITUDE: 1850 },
+		]);
+	});
+
+	// MERGE only matches each source row against the target table, never against the other source
+	// rows in the same batch, so two input items sharing an ID would otherwise either hit Exasol's
+	// own "Unable to get a stable set of rows in the source tables" error (if the ID already
+	// exists in ITEMS) or silently insert two rows with the same "unique" ID (if it doesn't) —
+	// caught here before the statement ever reaches the database.
+	it('rejects a batch with duplicate Conflict Column values, and writes nothing', async () => {
+		const ctx = buildExecuteFunctions({
+			container: fixture.container,
+			operation: 'upsert',
+			params: { schema: fixture.schema, table: 'ITEMS', conflictColumns: ['ID'] },
+			items: [
+				{ json: { ID: 5, NAME: 'first', ALTITUDE: 100 } },
+				{ json: { ID: 5, NAME: 'second', ALTITUDE: 200 } },
+			],
+		});
+
+		const thrown = await new Exasol().execute.call(ctx).catch((e) => e);
+
+		expect(thrown).toBeInstanceOf(NodeOperationError);
+		expect((thrown as NodeOperationError).message).toContain(
+			'Rows 0, 1 all have the same Conflict Column value(s) (ID = 5)',
+		);
 		expect(await rowsInItems()).toEqual([
 			{ ID: 1, NAME: 'Val Thorens', ALTITUDE: 2300 },
 			{ ID: 2, NAME: 'Courchevel', ALTITUDE: 1850 },
