@@ -1,4 +1,36 @@
-import { schemaAndTableFields } from '../../nodes/Exasol/operations/shared/schemaTableFields';
+import {
+	schemaField,
+	schemaAndTableFields,
+} from '../../nodes/Exasol/operations/shared/schemaTableFields';
+
+describe('schemaField()', () => {
+	const displayOptions = { show: { operation: ['listTables'] } };
+
+	it('returns a single "schema" field', () => {
+		const field = schemaField(displayOptions, 'list tables from');
+
+		expect(field.name).toBe('schema');
+		expect(field.type).toBe('options');
+	});
+
+	it('wires up the listSchemas loadOptions method', () => {
+		const field = schemaField(displayOptions, 'list tables from');
+
+		expect(field.typeOptions).toMatchObject({ loadOptionsMethod: 'listSchemas' });
+	});
+
+	it('applies the given displayOptions', () => {
+		const field = schemaField(displayOptions, 'list tables from');
+
+		expect(field.displayOptions).toBe(displayOptions);
+	});
+
+	it('interpolates the given verb phrase into the description', () => {
+		const field = schemaField(displayOptions, 'list tables from');
+
+		expect(field.description).toContain('Schema to list tables from.');
+	});
+});
 
 describe('schemaAndTableFields()', () => {
 	const displayOptions = { show: { operation: ['insert'] } };
@@ -30,7 +62,13 @@ describe('schemaAndTableFields()', () => {
 	it('interpolates the given verb phrases into the field descriptions', () => {
 		const [schema, table] = schemaAndTableFields(displayOptions, 'select from', 'select rows from');
 
-		expect(schema.description).toContain('Schema containing the table to select from.');
+		expect(schema.description).toContain('Schema to select from.');
 		expect(table.description).toContain('Table to select rows from.');
+	});
+
+	it('builds its Schema field the same way schemaField() does', () => {
+		const [schema] = schemaAndTableFields(displayOptions, 'insert into', 'insert rows into');
+
+		expect(schema).toEqual(schemaField(displayOptions, 'insert into'));
 	});
 });

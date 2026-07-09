@@ -21,7 +21,8 @@ type MockDriver = {
 };
 
 // Builds the raw SQLResponse<SQLQueriesResponse> shape returned by stmt.execute() for a
-// single-column result set, as consumed by listTables' firstColumnValues() helper.
+// single-column result set, as consumed by listTables/listTablesAndViews' shared
+// fetchFirstColumnOptions() helper (via runRows()).
 function singleColumnResult(values: string[]) {
 	return {
 		status: 'ok',
@@ -193,6 +194,71 @@ describe('Exasol node loadOptions', () => {
 
 			await expect(
 				node.methods.loadOptions.listTables.call(makeContext({ schema: 'MY_SCHEMA' })),
+			).rejects.toThrow('auth failed');
+			expect(mockDriver.close).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe('listTablesAndViews', () => {
+		it('returns an empty list without querying when no schema is selected yet', async () => {
+			const options = await node.methods.loadOptions.listTablesAndViews.call(makeContext());
+
+			expect(options).toEqual([]);
+			expect(mockDriver.connect).not.toHaveBeenCalled();
+		});
+
+		it('queries EXA_ALL_TABLES UNION ALL EXA_ALL_VIEWS, binding schema twice', async () => {
+			mockStatement.execute.mockResolvedValue(singleColumnResult(['ITEMS', 'ITEMS_VIEW']));
+
+			const options = await node.methods.loadOptions.listTablesAndViews.call(
+				makeContext({ schema: 'MY_SCHEMA' }),
+			);
+
+			expect(mockDriver.prepare).toHaveBeenCalledWith(
+				'SELECT TABLE_NAME FROM EXA_ALL_TABLES WHERE TABLE_SCHEMA = ? UNION ALL SELECT VIEW_NAME FROM EXA_ALL_VIEWS WHERE VIEW_SCHEMA = ? ORDER BY 1',
+			);
+			expect(mockStatement.execute).toHaveBeenCalledWith('MY_SCHEMA', 'MY_SCHEMA');
+			expect(options).toEqual([
+				{ name: 'ITEMS', value: 'ITEMS' },
+				{ name: 'ITEMS_VIEW', value: 'ITEMS_VIEW' },
+			]);
+		});
+
+		it('returns an empty list when the schema has no tables or views', async () => {
+			mockStatement.execute.mockResolvedValue(singleColumnResult([]));
+
+			const options = await node.methods.loadOptions.listTablesAndViews.call(
+				makeContext({ schema: 'EMPTY_SCHEMA' }),
+			);
+
+			expect(options).toEqual([]);
+		});
+
+		it('throws NodeOperationError when the driver reports status: error', async () => {
+			mockStatement.execute.mockResolvedValue({
+				status: 'error',
+				exception: { sqlCode: 'E-1', text: 'schema not found' },
+			});
+
+			await expect(
+				node.methods.loadOptions.listTablesAndViews.call(makeContext({ schema: 'MISSING' })),
+			).rejects.toBeInstanceOf(NodeOperationError);
+		});
+
+		it('closes the statement and driver connection after querying', async () => {
+			mockStatement.execute.mockResolvedValue(singleColumnResult([]));
+
+			await node.methods.loadOptions.listTablesAndViews.call(makeContext({ schema: 'MY_SCHEMA' }));
+
+			expect(mockStatement.close).toHaveBeenCalledTimes(1);
+			expect(mockDriver.close).toHaveBeenCalledTimes(1);
+		});
+
+		it('closes the driver connection even when connect() itself fails', async () => {
+			mockDriver.connect.mockRejectedValue(new Error('auth failed'));
+
+			await expect(
+				node.methods.loadOptions.listTablesAndViews.call(makeContext({ schema: 'MY_SCHEMA' })),
 			).rejects.toThrow('auth failed');
 			expect(mockDriver.close).toHaveBeenCalledTimes(1);
 		});

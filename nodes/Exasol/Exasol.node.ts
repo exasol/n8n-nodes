@@ -12,7 +12,7 @@ import type {
 import { NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 
 import { ExasolDriver } from '@exasol/exasol-driver-ts';
-import type { ExaWebsocket, SQLQueriesResponse, SQLResponse } from '@exasol/exasol-driver-ts';
+import type { ExaWebsocket } from '@exasol/exasol-driver-ts';
 import WebSocket from 'ws';
 
 import {
@@ -28,8 +28,11 @@ import {
 	deleteRows,
 	upsertDescription,
 	upsert,
+	schemaExplorerDescription,
+	schemaExplorer,
+	SCHEMA_EXPLORER_OPERATIONS,
 } from './operations';
-import { resultSetToRows } from './operations/shared/resultMapper';
+import { runRows, type QueryRow } from './operations/shared/statementRunner';
 
 // Shape of the ExasolApi credential fields (mirrors ExasolApi.credentials.ts properties).
 interface ExasolCredentials {
@@ -64,18 +67,45 @@ function buildDriver(creds: ExasolCredentials): ExasolDriver {
 	});
 }
 
-// Pulls the values of a single-column result set out of the raw SQLResponse shape returned by
-// stmt.execute() (used by listTables, whose WHERE ? binding rules out the friendlier
-// driver.query()-only QueryResult/getRows() helper). Reuses resultSetToRows' column-major-to-
-// row-major pivot (shared with Execute Query and Select Rows) instead of re-decoding the wire
-// format here, then reads out the one selected column.
-function firstColumnValues(response: SQLResponse<SQLQueriesResponse>): string[] {
-	const result = response.responseData?.results?.[0];
-	if (result?.resultType !== 'resultSet' || !result.resultSet) return [];
-	const columnName = result.resultSet.columns[0]?.name;
-	if (!columnName) return [];
-	return resultSetToRows(result.resultSet).map((row) => row[columnName] as string);
+// Shared by listTables and listTablesAndViews below, whose only difference is the query text:
+// opens a short-lived connection, runs a single-column SELECT via runRows() (shared/
+// statementRunner.ts — the same prepare/execute/raw-vs-prepared branching and row pivot used by
+// Schema Explorer), and reads out the one selected column. Object.values(row)[0] rather than a
+// hardcoded column name, since listTablesAndViews' UNION ALL query's column name depends on its
+// first branch's alias. runRows already throws a descriptive Error (the driver's own exception
+// text, or a generic fallback) on failure — this just re-wraps it as a NodeOperationError so it
+// surfaces correctly in the editor UI.
+// The driver.close() cleanup here (and stmt.close() inside runRows) can be simplified once
+// automatic resource cleanup is implemented in the driver, see
+// https://github.com/exasol/exasol-driver-ts/issues/73.
+async function fetchFirstColumnOptions(
+	this: ILoadOptionsFunctions,
+	query: string,
+	params: unknown[],
+): Promise<INodePropertyOptions[]> {
+	const credentials = await this.getCredentials('exasolApi');
+	const driver = buildDriver(credentials as unknown as ExasolCredentials);
+	try {
+		await driver.connect();
+		let rows: QueryRow[];
+		try {
+			rows = await runRows(driver, query, params);
+		} catch (error) {
+			throw new NodeOperationError(this.getNode(), error as Error);
+		}
+		return rows.map((row) => {
+			const name = Object.values(row)[0] as string;
+			return { name, value: name };
+		});
+	} finally {
+		await driver.close().catch(() => {});
+	}
 }
+
+// Membership check backing the dispatch branch for the three Schema Explorer sub-operations,
+// which — unlike every other operation value — all route to the single schemaExplorer() function
+// rather than each having its own dedicated execute().
+const SCHEMA_EXPLORER_OPERATION_SET: ReadonlySet<string> = new Set(SCHEMA_EXPLORER_OPERATIONS);
 
 /**
  * n8n community node for Exasol. Implements INodeType — the interface n8n uses to discover,
@@ -134,6 +164,12 @@ export class Exasol implements INodeType {
 						action: 'Delete rows',
 					},
 					{
+						name: 'Describe Table',
+						value: 'describeTable',
+						description: "Describe a table or view's columns and constraints",
+						action: 'Describe a table',
+					},
+					{
 						name: 'Execute Query',
 						value: 'executeQuery',
 						description: 'Execute one or more SQL statements',
@@ -144,6 +180,18 @@ export class Exasol implements INodeType {
 						value: 'insert',
 						description: 'Insert rows into a table',
 						action: 'Insert rows',
+					},
+					{
+						name: 'List Schemas',
+						value: 'listSchemas',
+						description: 'List all schemas in the database',
+						action: 'List schemas',
+					},
+					{
+						name: 'List Tables',
+						value: 'listTables',
+						description: 'List tables (and optionally views) in a schema',
+						action: 'List tables',
 					},
 					{
 						name: 'Select Rows',
@@ -166,6 +214,7 @@ export class Exasol implements INodeType {
 			...updateDescription,
 			...deleteDescription,
 			...upsertDescription,
+			...schemaExplorerDescription,
 		],
 	};
 
@@ -195,33 +244,30 @@ export class Exasol implements INodeType {
 				// getCurrentNodeParameter (unlike getNodeParameter) reads the value currently set
 				// in the editor UI for this node, with no item index — loadOptions runs once per
 				// dropdown open, not once per input item.
-				// The cleanup code can be simplified once the automatic resource cleanup is
-				// implemented  in the driver, see https://github.com/exasol/exasol-driver-ts/issues/73.
 				const schema = this.getCurrentNodeParameter('schema') as string | undefined;
 				if (!schema) return [];
 
-				const credentials = await this.getCredentials('exasolApi');
-				const driver = buildDriver(credentials as unknown as ExasolCredentials);
-				try {
-					await driver.connect();
-					const stmt = await driver.prepare(
-						'SELECT TABLE_NAME FROM EXA_ALL_TABLES WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME',
-					);
-					try {
-						const response = await stmt.execute(schema);
-						if (response.status === 'error') {
-							throw new NodeOperationError(
-								this.getNode(),
-								response.exception?.text || 'Failed to list tables',
-							);
-						}
-						return firstColumnValues(response).map((name) => ({ name, value: name }));
-					} finally {
-						await stmt.close().catch(() => {});
-					}
-				} finally {
-					await driver.close().catch(() => {});
-				}
+				return fetchFirstColumnOptions.call(
+					this,
+					'SELECT TABLE_NAME FROM EXA_ALL_TABLES WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME',
+					[schema],
+				);
+			},
+
+			// Backs Describe Table's "table" field. Distinct from listTables above: that method
+			// (used by the write operations and List Tables) only offers tables, but Describe
+			// Table should be able to describe a view too, so this draws from both EXA_ALL_TABLES
+			// and EXA_ALL_VIEWS via UNION ALL. ORDER BY 1 (rather than a column name) avoids
+			// relying on which branch's column alias the union result inherits.
+			async listTablesAndViews(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+				const schema = this.getCurrentNodeParameter('schema') as string | undefined;
+				if (!schema) return [];
+
+				return fetchFirstColumnOptions.call(
+					this,
+					'SELECT TABLE_NAME FROM EXA_ALL_TABLES WHERE TABLE_SCHEMA = ? UNION ALL SELECT VIEW_NAME FROM EXA_ALL_VIEWS WHERE VIEW_SCHEMA = ? ORDER BY 1',
+					[schema, schema],
+				);
 			},
 		},
 	};
@@ -290,6 +336,15 @@ export class Exasol implements INodeType {
 				return [await deleteRows.call(this, driver, items)];
 			} else if (operation === 'upsert') {
 				return [await upsert.call(this, driver, items)];
+			} else if (SCHEMA_EXPLORER_OPERATION_SET.has(operation)) {
+				return [
+					await schemaExplorer.call(
+						this,
+						driver,
+						items,
+						operation as (typeof SCHEMA_EXPLORER_OPERATIONS)[number],
+					),
+				];
 			} else {
 				throw new NodeOperationError(this.getNode(), `Unknown operation: ${operation}`);
 			}

@@ -557,6 +557,19 @@ describe('execute()', () => {
 		await expect(node.execute.call(ctx)).rejects.toBeInstanceOf(NodeOperationError);
 	});
 
+	it('uses fallback message for a prepared-statement error with no exception details', async () => {
+		mockStatement.execute.mockResolvedValue({ status: 'error', exception: undefined });
+
+		const ctx = makeContext({
+			query: 'INSERT INTO t VALUES (?)',
+			parameters: [{ value: 'x' }],
+			continueOnFail: true,
+		});
+		const [[item]] = await node.execute.call(ctx);
+
+		expect(item.json.error).toBe('Query execution failed');
+	});
+
 	// ── Operation dispatch ───────────────────────────────────────────────────────
 
 	it('throws NodeOperationError for an unrecognized operation value', async () => {

@@ -4,6 +4,7 @@ import { NodeOperationError } from 'n8n-workflow';
 import type { ExasolDriver, SQLQueriesResponse, SQLResponse } from '@exasol/exasol-driver-ts';
 
 import { resultSetToRows } from '../shared/resultMapper';
+import { runRawOrPrepared } from '../shared/statementRunner';
 import { requireNonEmpty } from '../shared/validation';
 import { buildWhereClause, quoteIdentifier, readWhereConditions } from '../shared/whereBuilder';
 
@@ -126,30 +127,16 @@ function mapSelectResult(
 }
 
 // Runs one SELECT statement. WHERE values (if any) are bound via prepare() + stmt.execute() to
-// prevent SQL injection. When there are none, this goes through driver.query(..., 'raw') instead
-// of prepare(): the driver's prepare() unconditionally reads
-// response.responseData.parameterData.columns, which the server omits entirely for a statement
-// with zero `?` placeholders — prepare() throws "Cannot read properties of undefined (reading
-// 'columns')" for any parameter-free query. Mirrors the identical raw/parameterized split in
-// operations/executeQuery/execute.ts's runQuery().
+// prevent SQL injection; runRawOrPrepared (shared/statementRunner.ts) handles the raw-vs-prepared
+// branching this and every other SELECT/DML caller in the codebase needs.
 async function runSelect(
 	driver: ExasolDriver,
 	query: string,
 	params: unknown[],
 	itemIndex: number,
 ): Promise<INodeExecutionData[]> {
-	if (params.length === 0) {
-		const raw = await driver.query(query, undefined, undefined, 'raw');
-		return mapSelectResult(raw, itemIndex);
-	}
-
-	const stmt = await driver.prepare(query);
-	try {
-		const response = await stmt.execute(...params);
-		return mapSelectResult(response, itemIndex);
-	} finally {
-		await stmt.close().catch(() => {});
-	}
+	const response = await runRawOrPrepared(driver, query, params);
+	return mapSelectResult(response, itemIndex);
 }
 
 /**
