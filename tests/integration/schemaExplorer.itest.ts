@@ -14,6 +14,10 @@ describe('Schema Explorer operations', () => {
 
 	describe('List Schemas', () => {
 		it('includes the freshly created test schema, with its comment', async () => {
+			await fixture.connection.execute(
+				`COMMENT ON SCHEMA ${fixture.schema} IS 'schema used for ski resort test data'`,
+			);
+
 			const ctx = buildExecuteFunctions({
 				container: fixture.container,
 				operation: 'listSchemas',
@@ -22,6 +26,7 @@ describe('Schema Explorer operations', () => {
 
 			const testSchema = result.find((item) => item.json.name === fixture.schema);
 			expect(testSchema).toBeDefined();
+			expect(testSchema?.json.comment).toBe('schema used for ski resort test data');
 		});
 	});
 
