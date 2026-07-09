@@ -26,6 +26,8 @@ import {
 	update,
 	deleteDescription,
 	deleteRows,
+	upsertDescription,
+	upsert,
 } from './operations';
 import { resultSetToRows } from './operations/shared/resultMapper';
 
@@ -119,6 +121,13 @@ export class Exasol implements INodeType {
 				noDataExpression: true,
 				options: [
 					{
+						name: 'Create or Update',
+						value: 'upsert',
+						description:
+							'Create a new record, or update the current one if it already exists (upsert)',
+						action: 'Upsert rows',
+					},
+					{
 						name: 'Delete',
 						value: 'delete',
 						description: 'Delete rows from a table using structured filters',
@@ -156,6 +165,7 @@ export class Exasol implements INodeType {
 			...insertDescription,
 			...updateDescription,
 			...deleteDescription,
+			...upsertDescription,
 		],
 	};
 
@@ -278,6 +288,8 @@ export class Exasol implements INodeType {
 				return [await update.call(this, driver, items)];
 			} else if (operation === 'delete') {
 				return [await deleteRows.call(this, driver, items)];
+			} else if (operation === 'upsert') {
+				return [await upsert.call(this, driver, items)];
 			} else {
 				throw new NodeOperationError(this.getNode(), `Unknown operation: ${operation}`);
 			}

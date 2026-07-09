@@ -100,12 +100,17 @@ export function quoteIdentifier(identifier: string): string {
 
 /**
  * Renders a JS value as an inline SQL literal, for statements that cannot bind it as a `?`
- * parameter (see buildWhereClauseLiteral() below for why Delete needs this). Strings are
- * single-quoted with embedded quotes doubled — the same escaping technique quoteIdentifier()
- * uses for identifiers, applied here to values instead, so a user-supplied value can't break out
- * of the quotes to inject arbitrary SQL. Anything that isn't a string/number/boolean/nullish
- * (e.g. an object or array, which the "Value" field can produce via an n8n expression) is
- * stringified and quoted the same way as a string, rather than left as `[object Object]` unquoted.
+ * parameter (see buildWhereClauseLiteral() below for why Delete needs this, and mergeBuilder.ts
+ * for why Upsert does too). Strings are single-quoted with embedded quotes doubled — the same
+ * escaping technique quoteIdentifier() uses for identifiers, applied here to values instead, so a
+ * user-supplied value can't break out of the quotes to inject arbitrary SQL. A Date (e.g. from a
+ * JSON field an upstream node materialized as an actual Date instance, or a Value/Column
+ * expression like ={{ new Date() }}) is rendered as an Exasol-literal timestamp string rather
+ * than falling into the generic stringify path below — `String(date)` produces JS's verbose
+ * locale-formatted form (e.g. "Wed Jan 15 2025 ..."), which Exasol can't parse as a TIMESTAMP.
+ * Anything else that isn't a string/number/boolean/nullish (e.g. a plain object or array, which
+ * the "Value" field can produce via an n8n expression) is stringified and quoted the same way as
+ * a string, rather than left as `[object Object]` unquoted.
  */
 export function quoteLiteral(value: unknown): string {
 	if (value === null || value === undefined) {
@@ -119,6 +124,17 @@ export function quoteLiteral(value: unknown): string {
 			throw new TypeError(`Cannot inline a non-finite number as a SQL literal: ${value}`);
 		}
 		return String(value);
+	}
+	if (value instanceof Date) {
+		if (Number.isNaN(value.getTime())) {
+			throw new TypeError('Cannot inline an invalid Date as a SQL literal.');
+		}
+		// toISOString() is always "YYYY-MM-DDTHH:mm:ss.sssZ" (24 chars, UTC) — reslicing around the
+		// "T" and dropping the "Z" gives Exasol's default TIMESTAMP literal format
+		// ("YYYY-MM-DD HH24:MI:SS.FF3"), which Exasol implicitly casts against a TIMESTAMP/DATE
+		// column the same way it would a manually typed literal.
+		const iso = value.toISOString();
+		return `'${iso.slice(0, 10)} ${iso.slice(11, 23)}'`;
 	}
 	// NOSONAR: same /g-regex-instead-of-replaceAll rationale as quoteIdentifier() above.
 	return `'${String(value).replace(/'/g, "''")}'`; // NOSONAR

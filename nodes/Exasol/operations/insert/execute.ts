@@ -3,73 +3,10 @@ import { NodeOperationError } from 'n8n-workflow';
 
 import type { ExasolDriver } from '@exasol/exasol-driver-ts';
 
-import { readColumnMappings } from '../shared/columnMappings';
+import { buildRow, readColumns } from '../shared/columnMappings';
 import { runStatement } from '../shared/statementRunner';
 import { requireNonEmpty } from '../shared/validation';
 import { quoteIdentifier } from '../shared/whereBuilder';
-
-// Determines the column list for the combined statement. Insert sends every input item as one
-// row of a single multi-row INSERT statement, so the column list — unlike the values — must be
-// identical across all rows; it is therefore only read once, from item 0, rather than per item.
-//
-// Auto-Map Input Data takes its columns from item 0's own JSON keys. Map Each Column Below takes
-// them from the "Columns" collection configured on the node (also read at item 0, since the
-// column names themselves are not expected to vary by expression the way values are).
-function readColumns(
-	context: IExecuteFunctions,
-	dataMode: unknown,
-	firstItem: INodeExecutionData,
-): string[] {
-	if (dataMode === 'defineBelow') {
-		const columns = readColumnMappings(context, 0).map((mapping) => mapping.column);
-		if (columns.some((column) => typeof column !== 'string' || !column.trim())) {
-			throw new NodeOperationError(context.getNode(), 'Column name must be a non-empty string.', {
-				itemIndex: 0,
-			});
-		}
-		return columns;
-	}
-	return Object.keys(firstItem.json);
-}
-
-// Builds one row of bound values, in the same column order returned by readColumns(). Missing
-// values (a key absent from an item's JSON, or a column with no matching mapping row) become
-// null rather than undefined — the Exasol driver binds null as SQL NULL, not as a missing
-// placeholder. A mapping row naming a column outside readColumns()'s list throws instead (see
-// below) rather than silently dropping that value.
-function buildRow(
-	context: IExecuteFunctions,
-	dataMode: unknown,
-	columns: string[],
-	item: INodeExecutionData,
-	itemIndex: number,
-): unknown[] {
-	if (dataMode === 'defineBelow') {
-		const mappings = readColumnMappings(context, itemIndex);
-		const valueByColumn = new Map(mappings.map((mapping) => [mapping.column, mapping.value]));
-
-		// The column list itself is fixed from item 0 (see readColumns() above), but each item's
-		// mapping is re-read here, so a Column-name expression that resolves to a different name
-		// on a later item would otherwise go undetected: valueByColumn.get() would simply miss and
-		// fall back to null below, silently dropping that value instead of erroring. A mapping row
-		// naming a column outside item 0's column list is therefore rejected outright; a mapping
-		// that just has *fewer* rows than item 0 is fine and intentionally still null-fills.
-		const unknownColumns = mappings
-			.map((mapping) => mapping.column)
-			.filter((column) => !columns.includes(column));
-		if (unknownColumns.length > 0) {
-			throw new NodeOperationError(
-				context.getNode(),
-				`Item ${itemIndex} maps column(s) not present in the column list determined from item 0 (${columns.join(', ')}): ${unknownColumns.join(', ')}. When Column is set via an expression, it must resolve to the same column names for every item.`,
-				{ itemIndex },
-			);
-		}
-
-		return columns.map((column) => valueByColumn.get(column) ?? null);
-	}
-	const json = item.json as Record<string, unknown>;
-	return columns.map((column) => json[column] ?? null);
-}
 
 // Assembles `INSERT INTO "schema"."table" ("c1","c2") VALUES (?,?),(?,?),...` — one VALUES
 // tuple per input item, all bound via `?` and sent in a single prepare() + execute() round-trip.

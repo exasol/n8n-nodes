@@ -49,13 +49,19 @@ nodes/Exasol/
     selectRows/
       description.ts
       execute.ts
-    insert/ update/ delete/ upsert/   ← same layout
+    insert/ update/ delete/   ← same layout
+    upsert/
+      description.ts
+      execute.ts
+      mergeBuilder.ts     ← MERGE SQL generator, upsert-only; kept out of shared/ since no
+                             other operation uses it, but split out of execute.ts and
+                             unit-tested independently (see Testing standards) because of its
+                             own validation branches
     schemaExplorer/
       description.ts
       execute.ts          ← handles all 7 schema explorer operations
     shared/
       whereBuilder.ts     ← parameterized WHERE clause generator (Select, Update, Delete)
-      mergeBuilder.ts     ← MERGE SQL generator (Upsert)
       resultMapper.ts     ← column-major ResultSet → row-object pivot (Execute Query, Select Rows)
 
 tests/
@@ -90,7 +96,7 @@ Aim for near 100% line and branch coverage. Do not skip coverage for branches th
 - Location: `tests/unit/*.test.ts`
 - Mock `IExecuteFunctions` — never talk to a real database.
 - Every operation gets its own test file covering: happy path, edge cases, `continueOnFail` behavior, and error propagation.
-- Shared helpers (`whereBuilder.ts`, `mergeBuilder.ts`) are unit-tested independently of the operations that use them.
+- Shared helpers (e.g. `whereBuilder.ts`) are unit-tested independently of the operations that use them. The same standard applies to any operation-local builder module with real validation/branching logic of its own — e.g. `upsert/mergeBuilder.ts` — even when it isn't (yet) reused by another operation; only trivial single-branch query templates (e.g. `buildInsertQuery` in `insert/execute.ts`) are left private and covered transitively through the operation's own test file.
 
 ### Integration tests
 

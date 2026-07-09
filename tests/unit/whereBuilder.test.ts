@@ -205,6 +205,22 @@ describe('quoteLiteral()', () => {
 	it('stringifies and quotes a value of another type', () => {
 		expect(quoteLiteral(['a', 'b'])).toBe("'a,b'");
 	});
+
+	// A Date gets its own branch rather than falling into the generic stringify path above:
+	// String(date) produces JS's verbose locale-formatted form (e.g. "Wed Jan 15 2025 10:30:00
+	// GMT+0000 ..."), which Exasol can't parse as a TIMESTAMP — silently corrupting an inlined
+	// row/value that would have inserted correctly via a bound `?` parameter instead.
+	it('renders a Date as an Exasol timestamp literal', () => {
+		expect(quoteLiteral(new Date('2024-01-15T10:30:00.123Z'))).toBe("'2024-01-15 10:30:00.123'");
+	});
+
+	it('pads a Date with :00 seconds/milliseconds when they are zero', () => {
+		expect(quoteLiteral(new Date('2024-01-15T10:30:00.000Z'))).toBe("'2024-01-15 10:30:00.000'");
+	});
+
+	it('rejects an invalid Date', () => {
+		expect(() => quoteLiteral(new Date('not a date'))).toThrow(/invalid Date/);
+	});
 });
 
 describe('buildWhereClauseLiteral()', () => {
