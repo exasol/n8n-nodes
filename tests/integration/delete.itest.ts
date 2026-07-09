@@ -5,41 +5,38 @@ import { useExasolTestFixture } from './fixtures';
 import { readItemsWithAltitude, setupItemsWithAltitude } from './itemsFixture';
 import { buildExecuteFunctions } from './nodeTestHelper';
 
-describe('Update operation', () => {
+describe('Delete operation', () => {
 	const fixture = useExasolTestFixture({ setupData: setupItemsWithAltitude });
 
 	const rowsInItems = () => readItemsWithAltitude(fixture);
 
-	it('updates a single matching row via Auto-Map Input Data and leaves others unchanged', async () => {
+	it('deletes a single matching row and leaves others unchanged', async () => {
 		const ctx = buildExecuteFunctions({
 			container: fixture.container,
-			operation: 'update',
+			operation: 'delete',
 			params: {
 				schema: fixture.schema,
 				table: 'ITEMS',
 				where: { conditions: [{ column: 'ID', operator: 'equals', value: 1 }] },
 			},
-			items: [{ json: { NAME: 'Val Thorens (updated)' } }],
+			items: [{ json: {} }],
 		});
 		const [result] = await new Exasol().execute.call(ctx);
 
 		expect(result).toEqual([{ json: { affectedRows: 1 }, pairedItem: { item: 0 } }]);
 		expect(await rowsInItems()).toEqual([
-			{ ID: 1, NAME: 'Val Thorens (updated)', ALTITUDE: 2300 },
 			{ ID: 2, NAME: 'Courchevel', ALTITUDE: 1850 },
 			{ ID: 3, NAME: 'Kitzbuhel', ALTITUDE: 762 },
 		]);
 	});
 
-	it('updates every row matching a broader WHERE condition', async () => {
+	it('deletes every row matching a broader WHERE condition', async () => {
 		const ctx = buildExecuteFunctions({
 			container: fixture.container,
-			operation: 'update',
+			operation: 'delete',
 			params: {
 				schema: fixture.schema,
 				table: 'ITEMS',
-				dataMode: 'defineBelow',
-				columns: { mappings: [{ column: 'ALTITUDE', value: 0 }] },
 				where: { conditions: [{ column: 'ALTITUDE', operator: 'greaterThan', value: 1000 }] },
 			},
 			items: [{ json: {} }],
@@ -47,46 +44,41 @@ describe('Update operation', () => {
 		const [result] = await new Exasol().execute.call(ctx);
 
 		expect(result).toEqual([{ json: { affectedRows: 2 }, pairedItem: { item: 0 } }]);
-		expect(await rowsInItems()).toEqual([
-			{ ID: 1, NAME: 'Val Thorens', ALTITUDE: 0 },
-			{ ID: 2, NAME: 'Courchevel', ALTITUDE: 0 },
-			{ ID: 3, NAME: 'Kitzbuhel', ALTITUDE: 762 },
-		]);
+		expect(await rowsInItems()).toEqual([{ ID: 3, NAME: 'Kitzbuhel', ALTITUDE: 762 }]);
 	});
 
-	it('updates rows using Map Each Column Below (defineBelow)', async () => {
+	it('runs one DELETE per input item, with independent WHERE conditions', async () => {
 		const ctx = buildExecuteFunctions({
 			container: fixture.container,
-			operation: 'update',
+			operation: 'delete',
 			params: {
 				schema: fixture.schema,
 				table: 'ITEMS',
-				dataMode: 'defineBelow',
-				columns: { mappings: [{ column: 'NAME', value: 'Kitzbuhel (updated)' }] },
-				where: { conditions: [{ column: 'ID', operator: 'equals', value: 3 }] },
+				where: (itemIndex: number) => ({
+					conditions: [{ column: 'ID', operator: 'equals', value: itemIndex + 1 }],
+				}),
 			},
-			items: [{ json: {} }],
+			items: [{ json: {} }, { json: {} }],
 		});
 		const [result] = await new Exasol().execute.call(ctx);
 
-		expect(result).toEqual([{ json: { affectedRows: 1 }, pairedItem: { item: 0 } }]);
-		expect(await rowsInItems()).toContainEqual({
-			ID: 3,
-			NAME: 'Kitzbuhel (updated)',
-			ALTITUDE: 762,
-		});
+		expect(result).toEqual([
+			{ json: { affectedRows: 1 }, pairedItem: { item: 0 } },
+			{ json: { affectedRows: 1 }, pairedItem: { item: 1 } },
+		]);
+		expect(await rowsInItems()).toEqual([{ ID: 3, NAME: 'Kitzbuhel', ALTITUDE: 762 }]);
 	});
 
 	it('affects zero rows and reports affectedRows: 0 when WHERE matches nothing', async () => {
 		const ctx = buildExecuteFunctions({
 			container: fixture.container,
-			operation: 'update',
+			operation: 'delete',
 			params: {
 				schema: fixture.schema,
 				table: 'ITEMS',
 				where: { conditions: [{ column: 'ID', operator: 'equals', value: 999 }] },
 			},
-			items: [{ json: { NAME: 'nobody' } }],
+			items: [{ json: {} }],
 		});
 		const [result] = await new Exasol().execute.call(ctx);
 
@@ -98,12 +90,12 @@ describe('Update operation', () => {
 		]);
 	});
 
-	it('throws NodeOperationError when Where has no conditions, and writes nothing', async () => {
+	it('throws NodeOperationError when Where has no conditions, and deletes nothing', async () => {
 		const ctx = buildExecuteFunctions({
 			container: fixture.container,
-			operation: 'update',
+			operation: 'delete',
 			params: { schema: fixture.schema, table: 'ITEMS' },
-			items: [{ json: { NAME: 'should not land' } }],
+			items: [{ json: {} }],
 		});
 
 		const thrown = await new Exasol().execute.call(ctx).catch((e) => e);
@@ -120,20 +112,20 @@ describe('Update operation', () => {
 	it('throws NodeOperationError for an unknown table', async () => {
 		const ctx = buildExecuteFunctions({
 			container: fixture.container,
-			operation: 'update',
+			operation: 'delete',
 			params: {
 				schema: fixture.schema,
 				table: 'NO_SUCH_TABLE',
 				where: { conditions: [{ column: 'ID', operator: 'equals', value: 1 }] },
 			},
-			items: [{ json: { NAME: 'x' } }],
+			items: [{ json: {} }],
 		});
 
 		const thrown = await new Exasol().execute.call(ctx).catch((e) => e);
 
 		expect(thrown).toBeInstanceOf(NodeOperationError);
 		expect((thrown as NodeOperationError).message).toContain(
-			`(query: UPDATE "${fixture.schema}"."NO_SUCH_TABLE"`,
+			`(query: DELETE FROM "${fixture.schema}"."NO_SUCH_TABLE"`,
 		);
 	});
 });
