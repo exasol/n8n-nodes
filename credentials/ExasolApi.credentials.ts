@@ -10,10 +10,6 @@ export class ExasolApi implements ICredentialType {
 
 	documentationUrl = 'https://github.com/exasol/n8n-nodes';
 
-	// Delegates credential testing to Exasol.testExasolCredentials(), which opens a real
-	// WebSocket connection. An HTTP-based test property is not viable for a database driver.
-	testedBy = 'exasol';
-
 	properties: INodeProperties[] = [
 		{
 			displayName: 'Host',
@@ -52,6 +48,17 @@ export class ExasolApi implements ICredentialType {
 			type: 'string',
 			default: '',
 			description: 'Default schema for queries (optional)',
+		},
+		{
+			displayName: 'Result Row Limit',
+			name: 'resultSetMaxRows',
+			type: 'number',
+			default: 1000,
+			typeOptions: { minValue: 0 },
+			description:
+				'Maximum number of rows fetched per result set for any query run with this credential. ' +
+				'Caps memory usage against unbounded queries — especially relevant when this node is ' +
+				'driven by an AI agent as a tool. Set to 0 to explicitly opt out and fetch all rows.',
 		},
 	];
 }

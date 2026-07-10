@@ -41,6 +41,7 @@ interface ExasolCredentials {
 	user: string;
 	password: string;
 	schema: string;
+	resultSetMaxRows: number;
 }
 
 // ws.WebSocket.readyState includes 0 (CONNECTING) which ExaWebsocket does not define,
@@ -64,6 +65,9 @@ function buildDriver(creds: ExasolCredentials): ExasolDriver {
 		user: creds.user,
 		password: creds.password,
 		schema: creds.schema || undefined, // empty string must not be passed to the driver
+		// 0 means "no limit" at the node/credential layer; the driver itself treats
+		// resultSetMaxRows: 0 as "fetch zero rows", so 0 must never be passed through literally.
+		resultSetMaxRows: creds.resultSetMaxRows || undefined,
 	});
 }
 

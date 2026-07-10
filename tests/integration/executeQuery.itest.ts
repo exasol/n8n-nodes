@@ -27,6 +27,7 @@ describe('Execute Query operation', () => {
 			container: fixture.container,
 			params: {
 				query: `INSERT INTO ${fixture.schema}.COMPETITIONS VALUES ('FIS WC', 2024, 1000, 'Christine')`,
+				restrictToSelect: false,
 			},
 		});
 		const [[item]] = await new Exasol().execute.call(ctx);
@@ -44,6 +45,7 @@ describe('Execute Query operation', () => {
 				parameters: {
 					values: [{ value: 'FIS WC' }, { value: 2024 }, { value: 1000 }, { value: 'Christine' }],
 				},
+				restrictToSelect: false,
 			},
 		});
 		const [[item]] = await new Exasol().execute.call(ctx);
@@ -59,6 +61,7 @@ describe('Execute Query operation', () => {
 				parameters: {
 					values: [{ value: 'FIS WC' }, { value: 2024 }, { value: 1000 }, { value: 'Christine' }],
 				},
+				restrictToSelect: false,
 			},
 		});
 		await new Exasol().execute.call(insertCtx);
@@ -102,6 +105,7 @@ describe('Execute Query operation', () => {
 					`INSERT INTO ${fixture.schema}.COMPETITIONS VALUES ('FIS WC', 2024, 1000, 'Christine')`,
 					`INSERT INTO ${fixture.schema}.COMPETITIONS VALUES ('FIS WC', 2024, 1000, 'Allamande')`,
 				]),
+				restrictToSelect: false,
 			},
 		});
 		await new Exasol().execute.call(ctx);
@@ -123,6 +127,7 @@ describe('Execute Query operation', () => {
 					`INSERT INTO ${fixture.schema}.COMPETITIONS VALUES ('FIS WC', 2024, 1000, 'Christine')`,
 					'THIS IS INVALID SQL THAT WILL FAIL',
 				]),
+				restrictToSelect: false,
 			},
 		});
 
@@ -148,6 +153,7 @@ describe('Execute Query operation', () => {
 					`INSERT INTO ${fixture.schema}.COMPETITIONS VALUES ('FIS WC', 2024, 1000, 'Allamande')`,
 					`INSERT INTO ${fixture.schema}.COMPETITIONS VALUES ('FIS WC', 2024, 1001, 'Chanrossa')`,
 				]),
+				restrictToSelect: false,
 			},
 		});
 		const [result] = await new Exasol().execute.call(ctx);
@@ -177,6 +183,7 @@ describe('Execute Query operation', () => {
 					`INSERT INTO ${fixture.schema}.COMPETITIONS VALUES ('FIS WC', 2024, 1000, 'Christine')`,
 					'THIS IS INVALID SQL THAT WILL FAIL',
 				]),
+				restrictToSelect: false,
 			},
 		});
 
@@ -200,6 +207,7 @@ describe('Execute Query operation', () => {
 				parameters: {
 					values: [{ value: 'FIS WC' }, { value: 2024 }, { value: 1000 }, { value: 'Christine' }],
 				},
+				restrictToSelect: false,
 			},
 		});
 		const [[item]] = await new Exasol().execute.call(ctx);
@@ -217,6 +225,7 @@ describe('Execute Query operation', () => {
 					`INSERT INTO ${fixture.schema}.COMPETITIONS VALUES ('FIS WC', 2024, 1000, 'Christine')`,
 					'THIS IS INVALID SQL THAT WILL FAIL',
 				]),
+				restrictToSelect: false,
 			},
 			continueOnFail: true,
 		});
@@ -243,6 +252,7 @@ describe('Execute Query operation', () => {
 					`CREATE TABLE ${fixture.schema}.TMP_SINGLE_BATCH (ID INTEGER)`,
 					`INSERT INTO ${fixture.schema}.TMP_SINGLE_BATCH VALUES (1)`,
 				]),
+				restrictToSelect: false,
 			},
 		});
 		const [result] = await new Exasol().execute.call(ctx);
@@ -258,5 +268,87 @@ describe('Execute Query operation', () => {
 			)
 		).getRows();
 		expect(Number(rows[0].N)).toBe(1);
+	});
+
+	// ── Restrict to SELECT guard ────────────────────────────────────────────────
+	// restrictToSelect is left unset in every test below except the explicit opt-out, so
+	// these exercise the real default (true) against a live Exasol instance.
+
+	it('rejects a real SELECT ... INTO by default, and never creates the target table', async () => {
+		const ctx = buildExecuteFunctions({
+			container: fixture.container,
+			params: {
+				query: `SELECT RESORT_ID, RESORT_NAME INTO ${fixture.schema}.TMP_SELECT_INTO FROM ${fixture.schema}.SKI_RESORT`,
+			},
+		});
+
+		await expect(new Exasol().execute.call(ctx)).rejects.toThrow(/not recognized as a SELECT/);
+
+		const rows = (
+			await fixture.connection.query(
+				`SELECT TABLE_NAME FROM EXA_ALL_TABLES WHERE TABLE_SCHEMA = '${fixture.schema}' AND TABLE_NAME = 'TMP_SELECT_INTO'`,
+			)
+		).getRows();
+		expect(rows).toHaveLength(0);
+	});
+
+	it('rejects a real INSERT by default, and the row is never inserted', async () => {
+		const ctx = buildExecuteFunctions({
+			container: fixture.container,
+			params: {
+				query: `INSERT INTO ${fixture.schema}.COMPETITIONS VALUES ('FIS WC', 2024, 1000, 'Christine')`,
+			},
+		});
+
+		await expect(new Exasol().execute.call(ctx)).rejects.toThrow();
+
+		const rows = (
+			await fixture.connection.query(`SELECT COUNT(*) AS N FROM ${fixture.schema}.COMPETITIONS`)
+		).getRows();
+		expect(Number(rows[0].N)).toBe(0);
+	});
+
+	it('allows a real WITH ... SELECT (CTE) by default', async () => {
+		const ctx = buildExecuteFunctions({
+			container: fixture.container,
+			params: { query: 'WITH cte AS (SELECT 1 AS N) SELECT * FROM cte' },
+		});
+		const [[item]] = await new Exasol().execute.call(ctx);
+
+		expect(Number(item.json.N)).toBe(1);
+	});
+
+	it('rejects a real DELETE by default, but allows it (deleting the row) when disabled', async () => {
+		// Note: there is no "WITH ... DELETE" variant of this test — verified directly against
+		// this live instance that Exasol's grammar rejects a CTE preceding any non-SELECT
+		// statement outright (a "WITH" clause may only precede a SELECT), so that shape can
+		// never reach the driver regardless of this guard.
+		await fixture.connection.execute(
+			`INSERT INTO ${fixture.schema}.COMPETITIONS VALUES ('FIS WC', 2024, 1000, 'Christine')`,
+		);
+		const deleteQuery = `DELETE FROM ${fixture.schema}.COMPETITIONS WHERE SERIES = 'FIS WC'`;
+
+		const restrictedCtx = buildExecuteFunctions({
+			container: fixture.container,
+			params: { query: deleteQuery },
+		});
+		await expect(new Exasol().execute.call(restrictedCtx)).rejects.toThrow(/not recognized as a SELECT/);
+
+		const rowsAfterRejection = (
+			await fixture.connection.query(`SELECT COUNT(*) AS N FROM ${fixture.schema}.COMPETITIONS`)
+		).getRows();
+		expect(Number(rowsAfterRejection[0].N)).toBe(1);
+
+		const unrestrictedCtx = buildExecuteFunctions({
+			container: fixture.container,
+			params: { query: deleteQuery, restrictToSelect: false },
+		});
+		const [[item]] = await new Exasol().execute.call(unrestrictedCtx);
+		expect(item.json).toEqual({ affectedRows: 1 });
+
+		const rowsAfterDelete = (
+			await fixture.connection.query(`SELECT COUNT(*) AS N FROM ${fixture.schema}.COMPETITIONS`)
+		).getRows();
+		expect(Number(rowsAfterDelete[0].N)).toBe(0);
 	});
 });
