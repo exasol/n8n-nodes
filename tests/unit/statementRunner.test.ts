@@ -1,9 +1,39 @@
+import type { IExecuteFunctions } from 'n8n-workflow';
+import { NodeOperationError } from 'n8n-workflow';
+
 import type { ExasolDriver } from '@exasol/exasol-driver-ts';
 
 import {
+	runQuery,
 	runRawStatement,
 	runStatement,
 } from '../../nodes/Exasol/operations/shared/statementRunner';
+
+// Builds the SQLResponse<SQLQueriesResponse> shape returned by both driver.query(..., 'raw') and
+// stmt.execute() for a SELECT result. The Exasol wire format is column-major: data[colIdx][rowIdx].
+// This helper converts the friendlier row-major input so tests stay readable — same convention as
+// selectRows.test.ts's and schemaExplorer.test.ts's identical helper.
+function selectResult(rows: Record<string, unknown>[]) {
+	const cols = rows.length > 0 ? Object.keys(rows[0]) : [];
+	return {
+		status: 'ok',
+		responseData: {
+			numResults: 1,
+			results: [
+				{
+					resultType: 'resultSet',
+					resultSet: {
+						numColumns: cols.length,
+						numRows: rows.length,
+						numRowsInMessage: rows.length,
+						columns: cols.map((name) => ({ name, dataType: { type: 'VARCHAR' } })),
+						data: cols.map((col) => rows.map((row) => row[col] ?? null)),
+					},
+				},
+			],
+		},
+	};
+}
 
 type MockStatement = {
 	execute: jest.Mock;
@@ -245,5 +275,151 @@ describe('runRawStatement()', () => {
 				'Statement failed',
 			),
 		).rejects.toThrow('Statement failed');
+	});
+});
+
+describe('runQuery()', () => {
+	let mockStatement: MockStatement;
+	let mockDriver: { query: jest.Mock; prepare: jest.Mock };
+	let context: IExecuteFunctions;
+
+	beforeEach(() => {
+		mockStatement = {
+			execute: jest.fn().mockResolvedValue(selectResult([])),
+			close: jest.fn().mockResolvedValue(undefined),
+		};
+		mockDriver = {
+			query: jest.fn().mockResolvedValue(selectResult([])),
+			prepare: jest.fn().mockResolvedValue(mockStatement),
+		};
+		context = {
+			getNode: jest.fn().mockReturnValue({ name: 'Exasol', type: 'exasol' }),
+		} as unknown as IExecuteFunctions;
+	});
+
+	it('runs the raw path and returns pivoted rows when there are no bound params', async () => {
+		mockDriver.query.mockResolvedValue(selectResult([{ ID: 1 }, { ID: 2 }]));
+
+		const rows = await runQuery(context, mockDriver as unknown as ExasolDriver, 'SELECT * FROM T', [], 0);
+
+		expect(mockDriver.query).toHaveBeenCalledWith('SELECT * FROM T', undefined, undefined, 'raw');
+		expect(mockDriver.prepare).not.toHaveBeenCalled();
+		expect(rows).toEqual([{ ID: 1 }, { ID: 2 }]);
+	});
+
+	it('prepares the statement and binds params when there are bound params', async () => {
+		mockStatement.execute.mockResolvedValue(selectResult([{ ID: 1 }]));
+
+		const rows = await runQuery(
+			context,
+			mockDriver as unknown as ExasolDriver,
+			'SELECT * FROM T WHERE ID = ?',
+			[1],
+			0,
+		);
+
+		expect(mockDriver.prepare).toHaveBeenCalledWith('SELECT * FROM T WHERE ID = ?');
+		expect(mockStatement.execute).toHaveBeenCalledWith(1);
+		expect(rows).toEqual([{ ID: 1 }]);
+	});
+
+	it('closes the prepared statement after execution', async () => {
+		await runQuery(context, mockDriver as unknown as ExasolDriver, 'SELECT * FROM T WHERE ID = ?', [1], 0);
+
+		expect(mockStatement.close).toHaveBeenCalledTimes(1);
+	});
+
+	it('closes the prepared statement even when execution fails', async () => {
+		mockStatement.execute.mockRejectedValue(new Error('boom'));
+
+		await expect(
+			runQuery(context, mockDriver as unknown as ExasolDriver, 'SELECT * FROM T WHERE ID = ?', [1], 0),
+		).rejects.toThrow();
+		expect(mockStatement.close).toHaveBeenCalledTimes(1);
+	});
+
+	it('returns an empty array when the response has no result set (defensive)', async () => {
+		mockDriver.query.mockResolvedValue({ status: 'ok', responseData: { numResults: 0, results: [] } });
+
+		const rows = await runQuery(context, mockDriver as unknown as ExasolDriver, 'SELECT * FROM T', [], 0);
+
+		expect(rows).toEqual([]);
+	});
+
+	it('returns an empty array when responseData has no results array (defensive)', async () => {
+		mockDriver.query.mockResolvedValue({ status: 'ok', responseData: {} });
+
+		const rows = await runQuery(context, mockDriver as unknown as ExasolDriver, 'SELECT * FROM T', [], 0);
+
+		expect(rows).toEqual([]);
+	});
+
+	it('throws NodeOperationError when responseData is missing entirely, instead of treating it as zero rows', async () => {
+		mockDriver.query.mockResolvedValue({ status: 'ok' });
+
+		const thrown = await runQuery(
+			context,
+			mockDriver as unknown as ExasolDriver,
+			'SELECT * FROM T',
+			[],
+			0,
+		).catch((e) => e);
+
+		expect(thrown).toBeInstanceOf(NodeOperationError);
+		expect((thrown as NodeOperationError).message).toBe(
+			'Query returned no response data (query: SELECT * FROM T)',
+		);
+	});
+
+	it('throws NodeOperationError with the query text and itemIndex when the driver reports status: error', async () => {
+		mockDriver.query.mockResolvedValue({
+			status: 'error',
+			exception: { sqlCode: 'E-1', text: 'table not found' },
+		});
+
+		const thrown = await runQuery(
+			context,
+			mockDriver as unknown as ExasolDriver,
+			'SELECT * FROM T',
+			[],
+			2,
+		).catch((e) => e);
+
+		expect(thrown).toBeInstanceOf(NodeOperationError);
+		expect((thrown as NodeOperationError).message).toBe(
+			'table not found (query: SELECT * FROM T)',
+		);
+		expect((thrown as NodeOperationError).context).toMatchObject({ itemIndex: 2 });
+	});
+
+	it('falls back to a generic message when the error response has no exception details', async () => {
+		mockDriver.query.mockResolvedValue({ status: 'error', exception: undefined });
+
+		const thrown = await runQuery(
+			context,
+			mockDriver as unknown as ExasolDriver,
+			'SELECT * FROM T',
+			[],
+			0,
+		).catch((e) => e);
+
+		expect((thrown as NodeOperationError).message).toBe('Query failed (query: SELECT * FROM T)');
+	});
+
+	it('wraps a rejected driver call with the query text too', async () => {
+		mockDriver.query.mockRejectedValue(new Error('connection reset'));
+
+		const thrown = await runQuery(
+			context,
+			mockDriver as unknown as ExasolDriver,
+			'SELECT * FROM T',
+			[],
+			0,
+		).catch((e) => e);
+
+		expect(thrown).toBeInstanceOf(NodeOperationError);
+		expect((thrown as NodeOperationError).message).toBe(
+			'connection reset (query: SELECT * FROM T)',
+		);
 	});
 });

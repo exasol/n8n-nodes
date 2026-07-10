@@ -4,6 +4,7 @@ import { NodeOperationError } from 'n8n-workflow';
 import type { ExasolDriver, SQLQueryResponse } from '@exasol/exasol-driver-ts';
 
 import { resultSetToRows } from '../shared/resultMapper';
+import { runRawOrPrepared } from '../shared/statementRunner';
 
 // Reads the Parameters fixed-collection for one input item and returns the ordered
 // list of bound values. Returns [] when no parameters are configured (raw path).
@@ -55,16 +56,10 @@ function mapResults(
 	return mapSingleResult(results?.[0], itemIndex);
 }
 
-// Executes one query for one input item, choosing the path based on whether
-// parameters were provided.
-//
-// Raw path (no params):
-//   Uses driver.query() with responseType 'raw' so the driver returns the full
-//   SQLResponse without hard-throwing on result type. We inspect resultType
-//   ourselves, which correctly handles WITH...SELECT and WITH...INSERT/UPDATE/DELETE
-//   without needing to pre-classify the SQL text.
-//
-// Parameterized path: driver.prepare() + stmt.execute() prevents SQL injection.
+// Executes one query for one input item. runRawOrPrepared (shared/statementRunner.ts) picks the
+// raw (no params) vs prepared (bound params, SQL-injection-safe) path; we inspect resultType
+// ourselves, which correctly handles WITH...SELECT and WITH...INSERT/UPDATE/DELETE without needing
+// to pre-classify the SQL text.
 //   - SELECT result set → rows
 //   - rowCount / empty result → { affectedRows: N }
 async function runQuery(
@@ -73,28 +68,14 @@ async function runQuery(
 	params: unknown[],
 	itemIndex: number,
 ): Promise<INodeExecutionData[]> {
-	if (params.length === 0) {
-		const raw = await driver.query(query, undefined, undefined, 'raw');
-		if (raw.status === 'error') {
-			throw new Error(raw.exception?.text || 'Query execution failed');
-		}
-		if (!raw.responseData) {
-			throw new Error('Query returned no response data');
-		}
-		return mapResults(raw.responseData.results, itemIndex);
+	const response = await runRawOrPrepared(driver, query, params);
+	if (response.status === 'error') {
+		throw new Error(response.exception?.text || 'Query execution failed');
 	}
-
-	// Parameterized path: spread params as positional arguments to stmt.execute().
-	const stmt = await driver.prepare(query);
-	try {
-		const response = await stmt.execute(...params);
-		if (response.status === 'error') {
-			throw new Error(response.exception?.text || 'Prepared statement execution failed');
-		}
-		return mapResults(response.responseData.results, itemIndex);
-	} finally {
-		await stmt.close().catch(() => {});
+	if (!response.responseData) {
+		throw new Error('Query returned no response data');
 	}
+	return mapResults(response.responseData.results, itemIndex);
 }
 
 // Re-throws NodeOperationErrors as-is (already correctly attributed, e.g. by
