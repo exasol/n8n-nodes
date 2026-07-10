@@ -160,7 +160,7 @@ function stripLiteralsAndComments(query: string): StripResult {
  */
 function extractTokens(cleaned: string): string[] {
 	const tokens: string[] = [];
-	const wordRe = /[A-Za-z_][A-Za-z0-9_]*/g;
+	const wordRe = /[A-Za-z_]\w*/g;
 	let match: RegExpExecArray | null;
 	while ((match = wordRe.exec(cleaned)) !== null) {
 		tokens.push(match[0].toUpperCase());
