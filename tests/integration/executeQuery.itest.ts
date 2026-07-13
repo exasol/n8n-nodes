@@ -318,11 +318,12 @@ describe('Execute Query operation', () => {
 		expect(Number(item.json.N)).toBe(1);
 	});
 
-	it('rejects a real DELETE by default, but allows it (deleting the row) when disabled', async () => {
-		// Note: there is no "WITH ... DELETE" variant of this test — verified directly against
-		// this live instance that Exasol's grammar rejects a CTE preceding any non-SELECT
-		// statement outright (a "WITH" clause may only precede a SELECT), so that shape can
-		// never reach the driver regardless of this guard.
+	// Note: there is no "WITH ... DELETE" variant of these tests — verified directly against
+	// this live instance that Exasol's grammar rejects a CTE preceding any non-SELECT
+	// statement outright (a "WITH" clause may only precede a SELECT), so that shape can
+	// never reach the driver regardless of this guard.
+
+	it('rejects a real DELETE by default, and the row is never deleted', async () => {
 		await fixture.connection.execute(
 			`INSERT INTO ${fixture.schema}.COMPETITIONS VALUES ('FIS WC', 2024, 1000, 'Christine')`,
 		);
@@ -338,6 +339,13 @@ describe('Execute Query operation', () => {
 			await fixture.connection.query(`SELECT COUNT(*) AS N FROM ${fixture.schema}.COMPETITIONS`)
 		).getRows();
 		expect(Number(rowsAfterRejection[0].N)).toBe(1);
+	});
+
+	it('allows a real DELETE (deleting the row) when disabled', async () => {
+		await fixture.connection.execute(
+			`INSERT INTO ${fixture.schema}.COMPETITIONS VALUES ('FIS WC', 2024, 1000, 'Christine')`,
+		);
+		const deleteQuery = `DELETE FROM ${fixture.schema}.COMPETITIONS WHERE SERIES = 'FIS WC'`;
 
 		const unrestrictedCtx = buildExecuteFunctions({
 			container: fixture.container,
