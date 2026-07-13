@@ -93,7 +93,9 @@ describe('execute()', () => {
 	 * - getNodeParameter: dispatches by name; 'query' returns opts.query (string
 	 *   for all items, or string[] indexed by item), 'executionMode' returns
 	 *   opts.executionMode (default: 'sequentially'), 'parameters' returns a
-	 *   fixedCollection-shaped object from opts.parameters.
+	 *   fixedCollection-shaped object from opts.parameters, 'restrictToSelect'
+	 *   returns opts.restrictToSelect (falls through to the real default, true,
+	 *   via the fallback argument readQuery() passes).
 	 * - continueOnFail: returns opts.continueOnFail (default: false)
 	 */
 	function makeContext(
@@ -104,6 +106,7 @@ describe('execute()', () => {
 			parameters?: Array<{ value: unknown }>;
 			executionMode?: string;
 			continueOnFail?: boolean;
+			restrictToSelect?: boolean;
 		} = {},
 	): IExecuteFunctions {
 		return {
@@ -130,6 +133,7 @@ describe('execute()', () => {
 						if (Array.isArray(opts.query)) return opts.query[itemIndex ?? 0] ?? '';
 						return opts.query ?? 'SELECT 1';
 					}
+					if (name === 'restrictToSelect') return opts.restrictToSelect ?? fallback;
 					throw new Error(`Unexpected parameter name in mock: ${name}`);
 				}),
 			continueOnFail: jest.fn().mockReturnValue(opts.continueOnFail ?? false),
@@ -188,7 +192,7 @@ describe('execute()', () => {
 	it('returns { affectedRows: N } for raw non-SELECT queries', async () => {
 		mockDriver.query.mockResolvedValueOnce(rawDmlResult(5));
 
-		const ctx = makeContext({ query: 'DELETE FROM t WHERE id > 0' });
+		const ctx = makeContext({ query: 'DELETE FROM t WHERE id > 0', restrictToSelect: false });
 		const [[item]] = await node.execute.call(ctx);
 
 		expect(item.json).toEqual({ affectedRows: 5 });
@@ -207,7 +211,7 @@ describe('execute()', () => {
 			jest.clearAllMocks();
 			mockDriver.query.mockResolvedValueOnce(rawDmlResult(0));
 
-			await node.execute.call(makeContext({ query: dml }));
+			await node.execute.call(makeContext({ query: dml, restrictToSelect: false }));
 
 			expect(mockDriver.query).toHaveBeenCalledWith(dml, undefined, undefined, 'raw');
 			// driver.execute() is reserved for COMMIT/ROLLBACK in transaction mode
@@ -227,10 +231,117 @@ describe('execute()', () => {
 	it('correctly handles WITH...INSERT (CTE used in DML)', async () => {
 		mockDriver.query.mockResolvedValueOnce(rawDmlResult(2));
 
-		const ctx = makeContext({ query: 'WITH src AS (SELECT 1) INSERT INTO t SELECT * FROM src' });
+		const ctx = makeContext({
+			query: 'WITH src AS (SELECT 1) INSERT INTO t SELECT * FROM src',
+			restrictToSelect: false,
+		});
 		const [[item]] = await node.execute.call(ctx);
 
 		expect(item.json).toEqual({ affectedRows: 2 });
+	});
+
+	// ── Restrict to SELECT Queries guard ────────────────────────────────────────
+	// restrictToSelect defaults to true (see makeContext's mock: opts.restrictToSelect ??
+	// fallback, and readQuery()'s own getNodeParameter fallback of true) — every test in this
+	// section other than the explicit opt-out relies on that default rather than passing it.
+
+	describe('restrictToSelect guard', () => {
+		it('rejects a non-SELECT query by default', async () => {
+			const ctx = makeContext({ query: 'DELETE FROM t' });
+
+			await expect(node.execute.call(ctx)).rejects.toBeInstanceOf(NodeOperationError);
+			expect(mockDriver.query).not.toHaveBeenCalled();
+		});
+
+		it('stores the guard rejection as an error item when continueOnFail is true', async () => {
+			const ctx = makeContext({ query: 'DELETE FROM t', continueOnFail: true });
+			const [[item]] = await node.execute.call(ctx);
+
+			expect(item.json).toMatchObject({ error: expect.stringContaining('not recognized as a SELECT') });
+		});
+
+		it('allows a plain SELECT by default', async () => {
+			mockDriver.query.mockResolvedValue(rawQueryResult([{ n: 1 }]));
+
+			const ctx = makeContext({ query: 'SELECT 1 AS n' });
+			const [[item]] = await node.execute.call(ctx);
+
+			expect(item.json).toEqual({ n: 1 });
+		});
+
+		it('allows WITH...SELECT by default', async () => {
+			mockDriver.query.mockResolvedValue(rawQueryResult([{ n: 1 }]));
+
+			const ctx = makeContext({ query: 'WITH cte AS (SELECT 1 AS n) SELECT * FROM cte' });
+			const [[item]] = await node.execute.call(ctx);
+
+			expect(item.json).toEqual({ n: 1 });
+		});
+
+		it('rejects SELECT ... INTO by default', async () => {
+			const ctx = makeContext({ query: 'SELECT a, b INTO new_table FROM t' });
+
+			const thrown = await node.execute.call(ctx).catch((e) => e);
+
+			expect(thrown).toBeInstanceOf(NodeOperationError);
+			expect((thrown as NodeOperationError).message).toContain('not recognized as a SELECT');
+			expect(mockDriver.query).not.toHaveBeenCalled();
+		});
+
+		it('allows a non-SELECT query when explicitly disabled', async () => {
+			mockDriver.query.mockResolvedValueOnce(rawDmlResult(1));
+
+			const ctx = makeContext({ query: 'DELETE FROM t', restrictToSelect: false });
+			const [[item]] = await node.execute.call(ctx);
+
+			expect(item.json).toEqual({ affectedRows: 1 });
+		});
+
+		it('rejects only the offending item in a mixed sequential run, with continueOnFail', async () => {
+			mockDriver.query.mockResolvedValueOnce(rawQueryResult([{ n: 1 }]));
+
+			const ctx = makeContext({
+				items: [{ json: {} }, { json: {} }],
+				query: ['SELECT 1 AS n', 'DELETE FROM t'],
+				continueOnFail: true,
+			});
+			const [result] = await node.execute.call(ctx);
+
+			expect(result[0].json).toEqual({ n: 1 });
+			expect(result[1].json).toMatchObject({ error: expect.stringContaining('not recognized as a SELECT') });
+		});
+
+		it('rolls back the transaction when an item violates the guard', async () => {
+			mockDriver.query.mockResolvedValueOnce(rawQueryResult([{ n: 1 }]));
+
+			const ctx = makeContext({
+				items: [{ json: {} }, { json: {} }],
+				query: ['SELECT 1 AS n', 'DELETE FROM t'],
+				executionMode: 'transaction',
+			});
+
+			await expect(node.execute.call(ctx)).rejects.toBeInstanceOf(NodeOperationError);
+			expect(mockDriver.execute).toHaveBeenCalledWith('ROLLBACK');
+		});
+
+		it('rejects up front in Single Batch mode, attributed to the real offending item, without calling executeBatch', async () => {
+			// Mirrors the existing empty-query test for Single Batch mode: the up-front
+			// items.map(readQuery) validation throws its own already-itemIndex-tagged
+			// NodeOperationError, which toNodeOperationError() re-throws as-is rather than
+			// overwriting with the "attributed to item 0" fallback used for an actual
+			// executeBatch()-level failure.
+			const ctx = makeContext({
+				items: [{ json: {} }, { json: {} }],
+				executionMode: 'single',
+				query: ['SELECT 1 AS n', 'DELETE FROM t'],
+			});
+			const thrown = await node.execute.call(ctx).catch((e) => e);
+
+			expect(thrown).toBeInstanceOf(NodeOperationError);
+			expect((thrown as NodeOperationError).message).toContain('not recognized as a SELECT');
+			expect((thrown as NodeOperationError).context?.itemIndex).toBe(1);
+			expect(mockDriver.executeBatch).not.toHaveBeenCalled();
+		});
 	});
 
 	// ── Driver lifecycle ─────────────────────────────────────────────────────────
@@ -405,6 +516,7 @@ describe('execute()', () => {
 		const ctx = makeContext({
 			query: 'INSERT INTO t VALUES (?)',
 			parameters: [{ value: 'x' }],
+			restrictToSelect: false,
 		});
 		const [[item]] = await node.execute.call(ctx);
 
@@ -422,6 +534,7 @@ describe('execute()', () => {
 		const ctx = makeContext({
 			query: 'CREATE TABLE t (id INTEGER)',
 			parameters: [{ value: 1 }],
+			restrictToSelect: false,
 		});
 		const [[item]] = await node.execute.call(ctx);
 
@@ -448,7 +561,11 @@ describe('execute()', () => {
 		});
 
 		await node.execute.call(
-			makeContext({ query: 'INSERT INTO t VALUES (?)', parameters: [{ value: 1 }] }),
+			makeContext({
+				query: 'INSERT INTO t VALUES (?)',
+				parameters: [{ value: 1 }],
+				restrictToSelect: false,
+			}),
 		);
 
 		expect(mockStatement.close).toHaveBeenCalledTimes(1);
@@ -459,7 +576,12 @@ describe('execute()', () => {
 
 		await expect(
 			node.execute.call(
-				makeContext({ query: 'BAD SQL ?', parameters: [{ value: 1 }], continueOnFail: false }),
+				makeContext({
+					query: 'BAD SQL ?',
+					parameters: [{ value: 1 }],
+					continueOnFail: false,
+					restrictToSelect: false,
+				}),
 			),
 		).rejects.toThrow();
 
@@ -479,6 +601,7 @@ describe('execute()', () => {
 		const ctx = makeContext({
 			query: 'INSERT INTO t VALUES (?, ?)',
 			parameters: [{ value: 'a' }, { value: 'b' }],
+			restrictToSelect: false,
 		});
 		await node.execute.call(ctx);
 
@@ -535,6 +658,7 @@ describe('execute()', () => {
 			query: 'INSERT INTO t VALUES (?)',
 			parameters: [{ value: 'x' }],
 			continueOnFail: true,
+			restrictToSelect: false,
 		});
 		const [[item]] = await node.execute.call(ctx);
 
@@ -552,6 +676,7 @@ describe('execute()', () => {
 			query: 'INSERT INTO t VALUES (?)',
 			parameters: [{ value: 'x' }],
 			continueOnFail: false,
+			restrictToSelect: false,
 		});
 
 		await expect(node.execute.call(ctx)).rejects.toBeInstanceOf(NodeOperationError);
@@ -564,6 +689,7 @@ describe('execute()', () => {
 			query: 'INSERT INTO t VALUES (?)',
 			parameters: [{ value: 'x' }],
 			continueOnFail: true,
+			restrictToSelect: false,
 		});
 		const [[item]] = await node.execute.call(ctx);
 
@@ -716,6 +842,7 @@ describe('execute()', () => {
 				items: [{ json: {} }, { json: {} }],
 				executionMode: 'single',
 				query: ['SELECT 1 AS N', 'INSERT INTO t VALUES (2)'],
+				restrictToSelect: false,
 			});
 			const [result] = await node.execute.call(ctx);
 
@@ -748,7 +875,11 @@ describe('execute()', () => {
 				responseData: { numResults: 1, results: [{ resultType: 'rowCount', rowCount: 1 }] },
 			});
 
-			const ctx = makeContext({ executionMode: 'single', query: 'INSERT INTO t VALUES (1)' });
+			const ctx = makeContext({
+				executionMode: 'single',
+				query: 'INSERT INTO t VALUES (1)',
+				restrictToSelect: false,
+			});
 			await node.execute.call(ctx);
 
 			expect(mockDriver.execute).not.toHaveBeenCalled();
@@ -765,6 +896,7 @@ describe('execute()', () => {
 				executionMode: 'single',
 				query: 'INSERT INTO t VALUES (?)',
 				parameters: [{ value: 1 }],
+				restrictToSelect: false,
 			});
 			const [[item]] = await node.execute.call(ctx);
 
@@ -792,6 +924,7 @@ describe('execute()', () => {
 				executionMode: 'single',
 				query: 'INSERT INTO t VALUES (?)',
 				parameters: [{ value: 1 }],
+				restrictToSelect: false,
 			});
 			await node.execute.call(ctx);
 
@@ -850,6 +983,7 @@ describe('execute()', () => {
 				items: [{ json: {} }, { json: {} }],
 				executionMode: 'single',
 				query: ['INSERT INTO t VALUES (1)', 'BAD SQL'],
+				restrictToSelect: false,
 			});
 			const thrown = await node.execute.call(ctx).catch((e) => e);
 
@@ -870,6 +1004,7 @@ describe('execute()', () => {
 				executionMode: 'single',
 				query: ['INSERT INTO t VALUES (1)', 'BAD SQL'],
 				continueOnFail: true,
+				restrictToSelect: false,
 			});
 			const [result] = await node.execute.call(ctx);
 
@@ -919,6 +1054,7 @@ describe('execute()', () => {
 				items: [{ json: {} }, { json: {} }, { json: {} }],
 				executionMode: 'single',
 				query: ['INSERT INTO t VALUES (0)', 'INSERT INTO t VALUES (1)', 'INSERT INTO t VALUES (2)'],
+				restrictToSelect: false,
 			});
 			const thrown = await node.execute.call(ctx).catch((e) => e);
 
@@ -949,7 +1085,11 @@ describe('execute()', () => {
 		it('throws NodeOperationError attributed to item 0 when executeBatch itself rejects', async () => {
 			mockDriver.executeBatch.mockRejectedValue(new Error('connection reset'));
 
-			const ctx = makeContext({ executionMode: 'single', query: 'INSERT INTO t VALUES (1)' });
+			const ctx = makeContext({
+				executionMode: 'single',
+				query: 'INSERT INTO t VALUES (1)',
+				restrictToSelect: false,
+			});
 			const thrown = await node.execute.call(ctx).catch((e) => e);
 
 			expect(thrown).toBeInstanceOf(NodeOperationError);

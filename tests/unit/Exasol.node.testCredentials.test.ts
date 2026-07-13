@@ -100,4 +100,36 @@ describe('testExasolCredentials()', () => {
 			expect.objectContaining({ schema: undefined }),
 		);
 	});
+
+	it('converts a resultSetMaxRows of 0 to undefined (no limit) when building the driver', async () => {
+		const credNoLimit = {
+			...credential,
+			data: { ...credential.data, resultSetMaxRows: 0 },
+		} as ICredentialsDecrypted;
+		mockDriver.query.mockResolvedValue({ getRows: () => [] });
+
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		await node.testExasolCredentials.call({} as any, credNoLimit);
+
+		expect(MockedExasolDriver).toHaveBeenCalledWith(
+			expect.any(Function),
+			expect.objectContaining({ resultSetMaxRows: undefined }),
+		);
+	});
+
+	it('passes a positive resultSetMaxRows through to the driver unchanged', async () => {
+		const credWithLimit = {
+			...credential,
+			data: { ...credential.data, resultSetMaxRows: 5000 },
+		} as ICredentialsDecrypted;
+		mockDriver.query.mockResolvedValue({ getRows: () => [] });
+
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		await node.testExasolCredentials.call({} as any, credWithLimit);
+
+		expect(MockedExasolDriver).toHaveBeenCalledWith(
+			expect.any(Function),
+			expect.objectContaining({ resultSetMaxRows: 5000 }),
+		);
+	});
 });

@@ -27,6 +27,29 @@ export const description: INodeProperties[] = [
 		},
 	},
 	{
+		// noDataExpression: true is a *security* requirement here, not just a UI nicety — this
+		// node is usableAsTool: true, and any field with noDataExpression: false is fillable by
+		// an AI agent driving the tool (like the "SQL Query" field above). If this flag could
+		// itself be set via an expression/AI input, an agent could flip it to false and defeat
+		// the guard entirely, so it must stay a workflow-design-time-only setting, same as
+		// Execution Mode below.
+		displayName: 'Restrict to SELECT Queries',
+		name: 'restrictToSelect',
+		type: 'boolean',
+		default: true,
+		noDataExpression: true,
+		description:
+			'Whether to reject any query that is not a read-only SELECT (or WITH ... SELECT) ' +
+			'statement before it reaches the database. Recommended when this node is exposed to an ' +
+			'AI agent or other freeform SQL input. Disable only for trusted workflows that need ' +
+			'Execute Query to run INSERT/UPDATE/DELETE/DDL statements.',
+		displayOptions: {
+			show: {
+				operation: ['executeQuery'],
+			},
+		},
+	},
+	{
 		// A fixedCollection with multipleValues: true renders as a repeatable list of
 		// entries; here each entry holds a single scalar value bound to the next ?
 		// placeholder in the query, from left to right.

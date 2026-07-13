@@ -5,6 +5,7 @@ import type { ExasolDriver, SQLQueryResponse } from '@exasol/exasol-driver-ts';
 
 import { resultSetToRows } from '../shared/resultMapper';
 import { runRawOrPrepared } from '../shared/statementRunner';
+import { assertSelectOnly } from './selectOnlyGuard';
 
 // Reads the Parameters fixed-collection for one input item and returns the ordered
 // list of bound values. Returns [] when no parameters are configured (raw path).
@@ -20,10 +21,26 @@ function extractParams(context: IExecuteFunctions, itemIndex: number): unknown[]
 
 // Reads and validates the query for one input item. Throws NodeOperationError (with
 // itemIndex) when the query is empty so callers always get a well-contextualised error.
-function readQuery(context: IExecuteFunctions, itemIndex: number): string {
+//
+// restrictToSelect is passed in rather than re-read here because it's noDataExpression: true
+// (see description.ts) — identical for every item in the execution — so it's read once in
+// execute() below, the same way executionMode is.
+//
+// When Restrict to SELECT Queries is enabled (the default), also runs assertSelectOnly() —
+// the mitigation for this node being usableAsTool: true with a freeform query field — and wraps
+// its plain Error the same way, so the guard's rejection reads identically to any other
+// per-item validation failure to continueOnFail / the caller.
+function readQuery(context: IExecuteFunctions, itemIndex: number, restrictToSelect: boolean): string {
 	const query = context.getNodeParameter('query', itemIndex) as string;
 	if (!query.trim()) {
 		throw new NodeOperationError(context.getNode(), 'SQL Query must not be empty', { itemIndex });
+	}
+	if (restrictToSelect) {
+		try {
+			assertSelectOnly(query);
+		} catch (error) {
+			throw new NodeOperationError(context.getNode(), error as Error, { itemIndex });
+		}
 	}
 	return query;
 }
@@ -131,10 +148,11 @@ async function executeSequentially(
 	context: IExecuteFunctions,
 	driver: ExasolDriver,
 	items: INodeExecutionData[],
+	restrictToSelect: boolean,
 ): Promise<INodeExecutionData[]> {
 	// getNodeParameter evaluates per-item expressions (e.g. ={{$json.query}}).
 	return runSequentially(context, driver, items, (i) => ({
-		query: readQuery(context, i),
+		query: readQuery(context, i, restrictToSelect),
 		params: extractParams(context, i),
 	}));
 }
@@ -146,6 +164,7 @@ async function executeTransaction(
 	context: IExecuteFunctions,
 	driver: ExasolDriver,
 	items: INodeExecutionData[],
+	restrictToSelect: boolean,
 ): Promise<INodeExecutionData[]> {
 	const returnData: INodeExecutionData[] = [];
 
@@ -162,7 +181,7 @@ async function executeTransaction(
 	try {
 		for (let i = 0; i < items.length; i++) {
 			currentItemIndex = i;
-			const query = readQuery(context, i); // throws NodeOperationError(itemIndex: i) if empty
+			const query = readQuery(context, i, restrictToSelect); // throws NodeOperationError(itemIndex: i) if empty
 			const params = extractParams(context, i);
 			returnData.push(...(await runQuery(driver, query, params, i)));
 		}
@@ -207,6 +226,7 @@ async function executeBatched(
 	context: IExecuteFunctions,
 	driver: ExasolDriver,
 	items: INodeExecutionData[],
+	restrictToSelect: boolean,
 ): Promise<INodeExecutionData[]> {
 	if (items.length === 0) return [];
 
@@ -214,7 +234,7 @@ async function executeBatched(
 		// Read every item's query/params exactly once up front. The values are reused
 		// below whichever path is taken (batched or the Parameters fallback) so an n8n
 		// expression in Query or Parameters (e.g. ={{ $now }}) is never evaluated twice.
-		const queries = items.map((_, i) => readQuery(context, i));
+		const queries = items.map((_, i) => readQuery(context, i, restrictToSelect));
 		const paramsByItem = items.map((_, i) => extractParams(context, i));
 
 		if (paramsByItem.some((params) => params.length > 0)) {
@@ -275,14 +295,16 @@ export async function execute(
 	driver: ExasolDriver,
 	items: INodeExecutionData[],
 ): Promise<INodeExecutionData[]> {
-	// executionMode is noDataExpression: true — same for all items; safe to read at index 0.
+	// executionMode and restrictToSelect are both noDataExpression: true — same for all items;
+	// safe to read once at index 0 instead of per item.
 	const executionMode = this.getNodeParameter('executionMode', 0, 'sequentially') as string;
+	const restrictToSelect = this.getNodeParameter('restrictToSelect', 0, true) as boolean;
 
 	if (executionMode === 'transaction') {
-		return executeTransaction(this, driver, items);
+		return executeTransaction(this, driver, items, restrictToSelect);
 	}
 	if (executionMode === 'single') {
-		return executeBatched(this, driver, items);
+		return executeBatched(this, driver, items, restrictToSelect);
 	}
-	return executeSequentially(this, driver, items);
+	return executeSequentially(this, driver, items, restrictToSelect);
 }
