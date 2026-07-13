@@ -162,7 +162,7 @@
     },
     {
       "parameters": {
-        "content": "## Demo 2 — Retail Revenue Mart\n\nA mini-ETL: aggregate the last 14 days of `RETAIL.SALES` (~585M rows) into a small reporting table, **idempotently** — re-running refreshes the same 14 rows instead of duplicating them.\n\n**Expected output:** upsert reports `affectedRows: 14`; read-back returns exactly 14 items on every run.",
+        "content": "## Demo 2 — Retail Revenue Mart\n\nA mini-ETL: aggregate the last 14 days of `RETAIL.SALES` (~585M rows) into a small reporting table, **idempotently** — re-running refreshes the same 14 rows instead of duplicating them.\n\n**Expected output:** upsert reports `affectedRows: 14`. On the static demo database the read-back returns the same 14 items on every run; on a changing source the mart accumulates dates and the `REVENUE > 0` filter may drop days.",
         "height": 280,
         "width": 900,
         "color": 5

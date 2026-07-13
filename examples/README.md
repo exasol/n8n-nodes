@@ -15,10 +15,13 @@ what it demonstrates and what output to expect. On the canvas, sticky notes next
 
 ## Prerequisites
 
-- **Demos 1, 2 and 5** query the schemas `FLIGHTS` and `RETAIL` of the
-  [Exasol demo database](https://docs.exasol.com/db/latest/get_started/connect_our_demo_db.htm).
-  If your database does not have them, adjust the schema/table names in the query nodes — any
-  reasonably large table works.
+- These workflows are built against the **Exasol demo database**. If you don't already have
+  credentials for it, request access via [Book a Demo](https://www.exasol.com/book-a-demo/). Each
+  user of the demo database also gets their own personal schema with full read/write access,
+  which the write demos below use.
+- **Demos 1, 2 and 5** query the schemas `FLIGHTS` and `RETAIL` of the demo database. If your
+  database does not have them, adjust the schema/table names in the query nodes — any reasonably
+  large table works.
 - **Demos 2 and 3** create small demo tables (prefix `N8N_DEMO_`). The target schema is **not
   hardcoded**: a leading "Resolve Write Schema" node runs
   `SELECT COALESCE(CURRENT_SCHEMA, CURRENT_USER)`, so writes go to the default schema configured
@@ -73,8 +76,11 @@ of `RETAIL.SALES` (~585M rows), and **Create or Update** merges the result into 
 of duplicating them. A final **Select Rows** node reads the mart back using a WHERE condition
 collection (`REVENUE > 0`) and a sort rule (`SALES_DATE DESC`).
 
-**Expected output:** upsert reports `{ "affectedRows": 14 }`; read-back returns exactly 14 items,
-on every run.
+**Expected output:** the upsert reports `{ "affectedRows": 14 }` (the 14 most recent sales
+dates). The read-back returns the mart's rows with positive revenue — on the static demo
+database that is the same 14 items on every run. On a source whose data changes, the mart
+accumulates dates across runs, and the `REVENUE > 0` filter may exclude zero-revenue days, so
+the count can differ.
 
 ### Demo 3 — Contact List Lifecycle (CRUD)
 
