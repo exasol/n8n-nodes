@@ -1,0 +1,398 @@
+{
+  "id": "ExaDemo03Crud000",
+  "name": "Exasol Demo 3 — Contact List Lifecycle (CRUD)",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "d3000000-0000-4000-8000-000000000001",
+      "name": "When clicking 'Execute workflow'",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT COALESCE(CURRENT_SCHEMA, CURRENT_USER) AS DEMO_SCHEMA",
+        "restrictToSelect": true,
+        "executionMode": "sequentially"
+      },
+      "id": "d3000000-0000-4000-8000-000000000002",
+      "name": "Resolve Write Schema",
+      "type": "n8n-nodes-exasol.exasol",
+      "typeVersion": 1,
+      "position": [
+        300,
+        0
+      ],
+      "credentials": {
+        "exasolApi": {
+          "id": "ExasolDemoDbCred",
+          "name": "Exasol Demo DB"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=CREATE OR REPLACE TABLE \"{{ $json.DEMO_SCHEMA }}\".N8N_DEMO_CONTACTS (ID DECIMAL(9,0) PRIMARY KEY, FULL_NAME VARCHAR(200), EMAIL VARCHAR(320), STATUS VARCHAR(20), SIGNUP_DATE DATE, UPDATED_AT TIMESTAMP)",
+        "restrictToSelect": false,
+        "executionMode": "sequentially"
+      },
+      "id": "d3000000-0000-4000-8000-000000000003",
+      "name": "Recreate Contacts Table",
+      "type": "n8n-nodes-exasol.exasol",
+      "typeVersion": 1,
+      "position": [
+        600,
+        0
+      ],
+      "credentials": {
+        "exasolApi": {
+          "id": "ExasolDemoDbCred",
+          "name": "Exasol Demo DB"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Seed data for the demo. Keys are UPPERCASE because the Exasol node\n// quotes identifiers and Exasol stores unquoted names in uppercase.\nreturn [\n  { json: { ID: 1, FULL_NAME: 'Ada Lovelace', EMAIL: 'ada@example.com', STATUS: 'new', SIGNUP_DATE: '2026-07-01' } },\n  { json: { ID: 2, FULL_NAME: 'Grace Hopper', EMAIL: 'grace@example.com', STATUS: 'new', SIGNUP_DATE: '2026-07-05' } },\n  { json: { ID: 3, FULL_NAME: 'Alan Turing', EMAIL: 'alan@invalid', STATUS: 'new', SIGNUP_DATE: '2026-07-10' } },\n];"
+      },
+      "id": "d3000000-0000-4000-8000-000000000004",
+      "name": "Seed Contacts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": "={{ $('Resolve Write Schema').first().json.DEMO_SCHEMA }}",
+        "table": "N8N_DEMO_CONTACTS",
+        "dataMode": "autoMapInputData"
+      },
+      "id": "d3000000-0000-4000-8000-000000000005",
+      "name": "Insert Contacts",
+      "type": "n8n-nodes-exasol.exasol",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        0
+      ],
+      "credentials": {
+        "exasolApi": {
+          "id": "ExasolDemoDbCred",
+          "name": "Exasol Demo DB"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "schema": "={{ $('Resolve Write Schema').first().json.DEMO_SCHEMA }}",
+        "table": "N8N_DEMO_CONTACTS",
+        "dataMode": "defineBelow",
+        "columns": {
+          "mappings": [
+            {
+              "column": "STATUS",
+              "value": "active"
+            },
+            {
+              "column": "UPDATED_AT",
+              "value": "={{ $now.toFormat('yyyy-MM-dd HH:mm:ss') }}"
+            }
+          ]
+        },
+        "combineConditions": "AND",
+        "where": {
+          "conditions": [
+            {
+              "column": "EMAIL",
+              "operator": "like",
+              "value": "%@example.com"
+            }
+          ]
+        }
+      },
+      "id": "d3000000-0000-4000-8000-000000000006",
+      "name": "Activate Valid Contacts",
+      "type": "n8n-nodes-exasol.exasol",
+      "typeVersion": 1,
+      "position": [
+        1500,
+        0
+      ],
+      "credentials": {
+        "exasolApi": {
+          "id": "ExasolDemoDbCred",
+          "name": "Exasol Demo DB"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "schema": "={{ $('Resolve Write Schema').first().json.DEMO_SCHEMA }}",
+        "table": "N8N_DEMO_CONTACTS",
+        "combineConditions": "AND",
+        "where": {
+          "conditions": [
+            {
+              "column": "STATUS",
+              "operator": "equals",
+              "value": "new"
+            }
+          ]
+        }
+      },
+      "id": "d3000000-0000-4000-8000-000000000007",
+      "name": "Delete Unvalidated",
+      "type": "n8n-nodes-exasol.exasol",
+      "typeVersion": 1,
+      "position": [
+        1800,
+        0
+      ],
+      "credentials": {
+        "exasolApi": {
+          "id": "ExasolDemoDbCred",
+          "name": "Exasol Demo DB"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "parameters": {
+        "operation": "selectRows",
+        "schema": "={{ $('Resolve Write Schema').first().json.DEMO_SCHEMA }}",
+        "table": "N8N_DEMO_CONTACTS",
+        "returnAll": true,
+        "combineConditions": "AND",
+        "where": {
+          "conditions": []
+        },
+        "sort": {
+          "rules": [
+            {
+              "column": "ID",
+              "direction": "ASC"
+            }
+          ]
+        }
+      },
+      "id": "d3000000-0000-4000-8000-000000000008",
+      "name": "Read Back Contacts",
+      "type": "n8n-nodes-exasol.exasol",
+      "typeVersion": 1,
+      "position": [
+        2100,
+        0
+      ],
+      "credentials": {
+        "exasolApi": {
+          "id": "ExasolDemoDbCred",
+          "name": "Exasol Demo DB"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "parameters": {
+        "content": "## Demo 3 — Contact List Lifecycle (CRUD)\n\nSeeds a contacts table, activates the entries with a valid e-mail, deletes the rest, and reads back the result.\n\nFully **idempotent**: the table is rebuilt on every run — no manual cleanup.\n\n**Expected output:** exactly 2 items, both `STATUS = \"active\"`.",
+        "height": 280,
+        "width": 900,
+        "color": 5
+      },
+      "id": "d3s00000-0000-4000-8000-900000000001",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        -460
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Resolve the write schema\n\nNothing is hardcoded: `SELECT COALESCE(CURRENT_SCHEMA, CURRENT_USER)` returns your credential’s *Default Schema*, or falls back to the schema named after your database user.\n\nSet the credential’s Default Schema to redirect all writes.",
+        "height": 360,
+        "width": 260
+      },
+      "id": "d3s00000-0000-4000-8000-900000000002",
+      "name": "Sticky Note2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        270,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Reset the demo table\n\n`CREATE OR REPLACE TABLE` gives every run a clean slate. *Restrict to SELECT Queries* is disabled here for the DDL.",
+        "height": 360,
+        "width": 260,
+        "color": 3
+      },
+      "id": "d3s00000-0000-4000-8000-900000000003",
+      "name": "Sticky Note3",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        570,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Seed & bulk insert\n\nThe Code node emits 3 items with **UPPERCASE keys** — the Exasol node quotes identifiers, and Exasol stores unquoted names uppercase.\n\n*Insert* auto-maps the items into **one batched INSERT** and returns a single `{ affectedRows: 3 }` item, so each following node runs exactly once.",
+        "height": 360,
+        "width": 560
+      },
+      "id": "d3s00000-0000-4000-8000-900000000004",
+      "name": "Sticky Note4",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        870,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Validate & purge\n\n*Update* uses *Map Each Column Below* plus a `LIKE ‘%@example.com’` condition to activate valid contacts, stamping `UPDATED_AT` via an expression.\n\n*Delete* removes what is left in status `new`.\n\nBoth operations **require at least one WHERE condition** — the node refuses to touch a whole table.",
+        "height": 360,
+        "width": 560
+      },
+      "id": "d3s00000-0000-4000-8000-900000000005",
+      "name": "Sticky Note5",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1470,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Verify the result\n\nSelect Rows sorted by `ID` — always 2 active contacts, Ada and Grace.",
+        "height": 360,
+        "width": 260
+      },
+      "id": "d3s00000-0000-4000-8000-900000000006",
+      "name": "Sticky Note6",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2070,
+        -160
+      ]
+    }
+  ],
+  "connections": {
+    "When clicking 'Execute workflow'": {
+      "main": [
+        [
+          {
+            "node": "Resolve Write Schema",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Write Schema": {
+      "main": [
+        [
+          {
+            "node": "Recreate Contacts Table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recreate Contacts Table": {
+      "main": [
+        [
+          {
+            "node": "Seed Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Seed Contacts": {
+      "main": [
+        [
+          {
+            "node": "Insert Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Contacts": {
+      "main": [
+        [
+          {
+            "node": "Activate Valid Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Activate Valid Contacts": {
+      "main": [
+        [
+          {
+            "node": "Delete Unvalidated",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete Unvalidated": {
+      "main": [
+        [
+          {
+            "node": "Read Back Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
