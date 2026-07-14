@@ -1,0 +1,151 @@
+{
+  "id": "ExaDemo01Flights",
+  "name": "Exasol Demo 1 — Flight Delay Report",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "d1000000-0000-4000-8000-000000000001",
+      "name": "When clicking 'Execute workflow'",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \"YEAR\", \"MONTH\" FROM FLIGHTS.FLIGHTS GROUP BY \"YEAR\", \"MONTH\" ORDER BY \"YEAR\" DESC, \"MONTH\" DESC LIMIT 1",
+        "restrictToSelect": true,
+        "executionMode": "sequentially"
+      },
+      "id": "d1000000-0000-4000-8000-000000000002",
+      "name": "Find Latest Month",
+      "type": "n8n-nodes-exasol.exasol",
+      "typeVersion": 1,
+      "position": [
+        300,
+        0
+      ],
+      "credentials": {
+        "exasolApi": {
+          "id": "ExasolDemoDbCred",
+          "name": "Exasol Demo DB"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT OP_UNIQUE_CARRIER AS CARRIER, COUNT(*) AS FLIGHT_COUNT, ROUND(AVG(ARR_DELAY), 1) AS AVG_ARR_DELAY_MIN FROM FLIGHTS.FLIGHTS WHERE \"YEAR\" = ? AND \"MONTH\" = ? GROUP BY OP_UNIQUE_CARRIER ORDER BY FLIGHT_COUNT DESC LIMIT 10",
+        "restrictToSelect": true,
+        "parameters": {
+          "values": [
+            {
+              "value": "={{ $json.YEAR }}"
+            },
+            {
+              "value": "={{ $json.MONTH }}"
+            }
+          ]
+        },
+        "executionMode": "sequentially"
+      },
+      "id": "d1000000-0000-4000-8000-000000000003",
+      "name": "Top Carriers",
+      "type": "n8n-nodes-exasol.exasol",
+      "typeVersion": 1,
+      "position": [
+        600,
+        0
+      ],
+      "credentials": {
+        "exasolApi": {
+          "id": "ExasolDemoDbCred",
+          "name": "Exasol Demo DB"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "parameters": {
+        "content": "## Demo 1 — Flight Delay Report\n\nFinds the most recent month of data in `FLIGHTS.FLIGHTS` (~185M rows) and reports the **top-10 carriers** of that month by flight count, with their average arrival delay.\n\n**Read-only** — both queries keep *Restrict to SELECT Queries* enabled and aggregate with `GROUP BY` + `LIMIT`.\n\n**Expected output:** 10 items with `CARRIER`, `FLIGHT_COUNT`, `AVG_ARR_DELAY_MIN`.",
+        "height": 280,
+        "width": 860,
+        "color": 5
+      },
+      "id": "d1s00000-0000-4000-8000-900000000001",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        -460
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Find the latest month\n\nInstead of hardcoding a date, this Execute Query asks the table itself for the newest `\"YEAR\"`/`\"MONTH\"` — the demo never goes stale.\n\nNote the double quotes: `YEAR` and `MONTH` are **reserved words** in Exasol SQL.",
+        "height": 360,
+        "width": 260
+      },
+      "id": "d1s00000-0000-4000-8000-900000000002",
+      "name": "Sticky Note2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        270,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Parameterized query\n\nThe SQL uses `?` placeholders. The *Parameters* collection binds values **left to right** — here two expressions reading `YEAR` and `MONTH` from the previous node’s output.",
+        "height": 360,
+        "width": 260
+      },
+      "id": "d1s00000-0000-4000-8000-900000000003",
+      "name": "Sticky Note3",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        570,
+        -160
+      ]
+    }
+  ],
+  "connections": {
+    "When clicking 'Execute workflow'": {
+      "main": [
+        [
+          {
+            "node": "Find Latest Month",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Latest Month": {
+      "main": [
+        [
+          {
+            "node": "Top Carriers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

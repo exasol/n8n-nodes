@@ -1,0 +1,231 @@
+{
+  "id": "ExaDemo04Explore",
+  "name": "Exasol Demo 4 — Schema Data Dictionary",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "d4000000-0000-4000-8000-000000000001",
+      "name": "When clicking 'Execute workflow'",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "listSchemas"
+      },
+      "id": "d4000000-0000-4000-8000-000000000002",
+      "name": "List All Schemas",
+      "type": "n8n-nodes-exasol.exasol",
+      "typeVersion": 1,
+      "position": [
+        300,
+        0
+      ],
+      "credentials": {
+        "exasolApi": {
+          "id": "ExasolDemoDbCred",
+          "name": "Exasol Demo DB"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d4a00000-0000-4000-8000-000000000001",
+              "leftValue": "={{ $json.name }}",
+              "rightValue": "RETAIL",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d4000000-0000-4000-8000-000000000003",
+      "name": "Keep RETAIL Schema",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [
+        600,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "listTables",
+        "schema": "={{ $json.name }}",
+        "includeViews": true
+      },
+      "id": "d4000000-0000-4000-8000-000000000004",
+      "name": "List Tables",
+      "type": "n8n-nodes-exasol.exasol",
+      "typeVersion": 1,
+      "position": [
+        900,
+        0
+      ],
+      "credentials": {
+        "exasolApi": {
+          "id": "ExasolDemoDbCred",
+          "name": "Exasol Demo DB"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "parameters": {
+        "operation": "describeTable",
+        "schema": "={{ $json.schema }}",
+        "table": "={{ $json.name }}"
+      },
+      "id": "d4000000-0000-4000-8000-000000000005",
+      "name": "Describe Each Table",
+      "type": "n8n-nodes-exasol.exasol",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        0
+      ],
+      "credentials": {
+        "exasolApi": {
+          "id": "ExasolDemoDbCred",
+          "name": "Exasol Demo DB"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "parameters": {
+        "content": "## Demo 4 — Schema Data Dictionary\n\nChains the three read-only Schema Explorer operations into a column-level data dictionary of one schema.\n\n**Expected output:** one item per column of every table/view in `RETAIL`, plus one constraints item per table.",
+        "height": 280,
+        "width": 900,
+        "color": 5
+      },
+      "id": "d4s00000-0000-4000-8000-900000000001",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        -460
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Discover, then narrow\n\n*List Schemas* emits every schema in the database. The Filter keeps only `RETAIL` — **edit it here** to explore another schema.",
+        "height": 360,
+        "width": 560
+      },
+      "id": "d4s00000-0000-4000-8000-900000000002",
+      "name": "Sticky Note2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        270,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### List Tables\n\nOne item per table of the schema — views included via the *Include Views* option.",
+        "height": 360,
+        "width": 260
+      },
+      "id": "d4s00000-0000-4000-8000-900000000003",
+      "name": "Sticky Note3",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        870,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Describe Each Table\n\nRuns **once per incoming table item**: emits one item per column (`name`, `type`, `nullable`, `default`, `comment`) plus a summary item with the table’s constraints.",
+        "height": 360,
+        "width": 260
+      },
+      "id": "d4s00000-0000-4000-8000-900000000004",
+      "name": "Sticky Note4",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1170,
+        -160
+      ]
+    }
+  ],
+  "connections": {
+    "When clicking 'Execute workflow'": {
+      "main": [
+        [
+          {
+            "node": "List All Schemas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List All Schemas": {
+      "main": [
+        [
+          {
+            "node": "Keep RETAIL Schema",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keep RETAIL Schema": {
+      "main": [
+        [
+          {
+            "node": "List Tables",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List Tables": {
+      "main": [
+        [
+          {
+            "node": "Describe Each Table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

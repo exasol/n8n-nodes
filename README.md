@@ -19,6 +19,11 @@ The Exasol node uses **ExasolApi** credentials. You will need:
 - **Schema** _(optional)_ – Default schema for queries
 - **Encryption** – Enable TLS (default: `true`)
 
+## Example workflows
+
+Importable demo workflows covering all operations — including using the node as an AI Agent
+tool — live in [examples/](examples/README.md).
+
 ## Development
 
 ```bash
