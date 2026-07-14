@@ -4,10 +4,16 @@
 
 npm package `n8n-nodes-exasol` — Exasol community nodes for n8n.
 
-The node provides 13 operations split into two groups:
+The node provides 9 operations split into two groups:
 
 **Database (6):** Execute Query, Select Rows, Insert, Update, Delete, Upsert  
-**Schema Explorer (7, read-only, for AI agent use):** List Schemas, List Tables, Describe Table, List Functions, Describe Function, List UDFs, Describe UDF
+**Schema Explorer (3, read-only, for AI agent use):** List Schemas, List Tables, Describe Table
+
+List Functions/Describe Function/List UDFs/Describe UDF were part of the original design but are
+not implemented — deferred because `EXA_ALL_FUNCTIONS` has no separate input/return-type columns
+to describe a function's signature from. See [doc/developer-guide.md](doc/developer-guide.md) for
+the human-facing contributor guide and [doc/community-vs-builtin.md](doc/community-vs-builtin.md)
+for how this community node differs from n8n's built-in database nodes.
 
 Design document: https://claude.ai/code/artifact/972130dc-8cc5-4f62-877f-10ac5b93ec43
 
@@ -59,7 +65,7 @@ nodes/Exasol/
                              own validation branches
     schemaExplorer/
       description.ts
-      execute.ts          ← handles all 7 schema explorer operations
+      execute.ts          ← handles all 3 schema explorer operations
     shared/
       whereBuilder.ts     ← parameterized WHERE clause generator (Select, Update, Delete)
       resultMapper.ts     ← column-major ResultSet → row-object pivot (Execute Query, Select Rows)
