@@ -1,4 +1,4 @@
-# n8n-nodes-exasol 0.1.0, released T.B.D.
+# n8n-nodes-exasol 0.1.0, released 2026-07-14
 
 Code name: Initial release
 
