@@ -30,9 +30,9 @@ Runs freeform SQL. Fields:
   - **Transaction** – all items run in a single database transaction; any failure rolls back every
     item.
   - **Single Batch** – all items sent in one round-trip. Only works when no item uses Parameters —
-    it silently falls back to Sequentially if any item does. If the batch fails, every item is
-    reported as failed with the same error message, since a batch failure can't be attributed to
-    one specific item.
+    it falls back to Sequentially if any item does, surfacing a warning execution hint on the node
+    rather than failing silently. If the batch fails, every item is reported as failed with the
+    same error message, since a batch failure can't be attributed to one specific item.
 
 ### Select Rows
 
