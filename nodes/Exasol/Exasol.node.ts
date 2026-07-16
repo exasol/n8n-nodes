@@ -274,28 +274,34 @@ export class Exasol implements INodeType {
 				);
 			},
 		},
-	};
 
-	// Called by n8n when the user clicks "Test credential" in the credential UI.
-	// Opens a real WebSocket connection and runs SELECT 1 to verify reachability and auth.
-	async testExasolCredentials(
-		this: ICredentialTestFunctions,
-		credential: ICredentialsDecrypted,
-	): Promise<INodeCredentialTestResult> {
-		// credential.data can be undefined in the type signature but is always populated here.
-		const creds = credential.data as unknown as ExasolCredentials;
-		const driver = buildDriver(creds);
-		try {
-			await driver.connect();
-			await driver.query('SELECT 1');
-			return { status: 'OK', message: 'Connection successful' };
-		} catch (error) {
-			return { status: 'Error', message: (error as Error).message };
-		} finally {
-			// Suppress errors from close() — the connection may already be broken at this point.
-			await driver.close().catch(() => {});
-		}
-	}
+		// n8n resolves a credential's `testedBy` string (see the `credentials` array above) by
+		// looking up `node.methods.credentialTest[testedBy]` — the function must live under this
+		// nested key, not as a plain class method, or the "Test" button in the credential UI
+		// finds nothing to call.
+		credentialTest: {
+			// Called by n8n when the user clicks "Test credential" in the credential UI.
+			// Opens a real WebSocket connection and runs SELECT 1 to verify reachability and auth.
+			async testExasolCredentials(
+				this: ICredentialTestFunctions,
+				credential: ICredentialsDecrypted,
+			): Promise<INodeCredentialTestResult> {
+				// credential.data can be undefined in the type signature but is always populated here.
+				const creds = credential.data as unknown as ExasolCredentials;
+				const driver = buildDriver(creds);
+				try {
+					await driver.connect();
+					await driver.query('SELECT 1');
+					return { status: 'OK', message: 'Connection successful' };
+				} catch (error) {
+					return { status: 'Error', message: (error as Error).message };
+				} finally {
+					// Suppress errors from close() — the connection may already be broken at this point.
+					await driver.close().catch(() => {});
+				}
+			},
+		},
+	};
 
 	// A new connection is opened per execution. Exasol's driver does not expose a connection
 	// pool that survives across n8n node invocations, so connect/close wraps every run.
