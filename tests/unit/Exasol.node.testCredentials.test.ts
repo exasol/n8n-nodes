@@ -38,11 +38,15 @@ describe('testExasolCredentials()', () => {
 		jest.clearAllMocks();
 	});
 
+	// n8n looks up this function at node.methods.credentialTest[testedBy] at runtime (see
+	// Exasol.node.ts), so tests call it through that same path rather than as a top-level method.
+	const testExasolCredentials = () => node.methods.credentialTest.testExasolCredentials;
+
 	it('returns OK when connection and query succeed', async () => {
 		mockDriver.query.mockResolvedValue({ getRows: () => [] });
 
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		const result = await node.testExasolCredentials.call({} as any, credential);
+		const result = await testExasolCredentials().call({} as any, credential);
 
 		expect(result).toEqual({ status: 'OK', message: 'Connection successful' });
 	});
@@ -51,7 +55,7 @@ describe('testExasolCredentials()', () => {
 		mockDriver.connect.mockRejectedValue(new Error('Connection refused'));
 
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		const result = await node.testExasolCredentials.call({} as any, credential);
+		const result = await testExasolCredentials().call({} as any, credential);
 
 		expect(result).toEqual({ status: 'Error', message: 'Connection refused' });
 	});
@@ -60,7 +64,7 @@ describe('testExasolCredentials()', () => {
 		mockDriver.query.mockRejectedValue(new Error('Auth failed'));
 
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		const result = await node.testExasolCredentials.call({} as any, credential);
+		const result = await testExasolCredentials().call({} as any, credential);
 
 		expect(result).toEqual({ status: 'Error', message: 'Auth failed' });
 	});
@@ -69,7 +73,7 @@ describe('testExasolCredentials()', () => {
 		mockDriver.connect.mockRejectedValue(new Error('fail'));
 
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		await node.testExasolCredentials.call({} as any, credential);
+		await testExasolCredentials().call({} as any, credential);
 
 		expect(mockDriver.close).toHaveBeenCalledTimes(1);
 	});
@@ -79,7 +83,7 @@ describe('testExasolCredentials()', () => {
 		mockDriver.close.mockRejectedValue(new Error('close failed'));
 
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		await expect(node.testExasolCredentials.call({} as any, credential)).resolves.toMatchObject({
+		await expect(testExasolCredentials().call({} as any, credential)).resolves.toMatchObject({
 			status: 'Error',
 			message: 'connect failed',
 		});
@@ -93,7 +97,7 @@ describe('testExasolCredentials()', () => {
 		mockDriver.query.mockResolvedValue({ getRows: () => [] });
 
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		await node.testExasolCredentials.call({} as any, credNoSchema);
+		await testExasolCredentials().call({} as any, credNoSchema);
 
 		expect(MockedExasolDriver).toHaveBeenCalledWith(
 			expect.any(Function),
@@ -109,7 +113,7 @@ describe('testExasolCredentials()', () => {
 		mockDriver.query.mockResolvedValue({ getRows: () => [] });
 
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		await node.testExasolCredentials.call({} as any, credNoLimit);
+		await testExasolCredentials().call({} as any, credNoLimit);
 
 		expect(MockedExasolDriver).toHaveBeenCalledWith(
 			expect.any(Function),
@@ -125,7 +129,7 @@ describe('testExasolCredentials()', () => {
 		mockDriver.query.mockResolvedValue({ getRows: () => [] });
 
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		await node.testExasolCredentials.call({} as any, credWithLimit);
+		await testExasolCredentials().call({} as any, credWithLimit);
 
 		expect(MockedExasolDriver).toHaveBeenCalledWith(
 			expect.any(Function),
